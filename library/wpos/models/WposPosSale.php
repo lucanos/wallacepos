@@ -156,14 +156,14 @@ class WposPosSale {
                 return $result;
             }
             // log data
-            Logger::write("Order added with ref: ".$this->ref, "ORDER", json_encode($this->jsonobj));
+            Logger::write("Order added with ref: ".$this->ref." (ID:".$this->id.")", "ORDER", json_encode($this->jsonobj));
         } else {
             if ($this->updateOrderRecord()===false){
                 $result["error"] = "Could not update order: ".$this->salesMdl->errorInfo;
                 return $result;
             }
             // log data
-            Logger::write("Order updated with ref: ".$this->ref, "ORDER", json_encode($this->jsonobj));
+            Logger::write("Order updated with ref: ".$this->ref." (ID:".$this->id.")", "ORDER", json_encode($this->jsonobj));
         }
 
         $result['data'] = $this->jsonobj;
@@ -197,7 +197,7 @@ class WposPosSale {
         $this->broadcastSale($this->jsonobj->devid, false, true);
 
         // log data
-        Logger::write("Order deleted with ref: ".$this->ref, "ORDER");
+        Logger::write("Order deleted with ref: ".$this->ref." (ID:".$this->id.")", "ORDER");
 
         return $result;
     }
@@ -231,10 +231,15 @@ class WposPosSale {
      */
     public function insertTransaction($result)
     {
-        $jsonval = new JsonValidate($this->jsonobj, '{"ref":"", "userid":1, "devid":1, "locid":1, "items":"[", "payments":"[", "total":1, "processdt":1}');
+        $jsonval = new JsonValidate($this->jsonobj, '{"ref":"", "userid":1, "devid":1, "locid":1, "items":"[", "payments":"[", "cost":1, "total":1, "processdt":1}');
         if (($errors = $jsonval->validate())!==true){
-            $result['error'] = $errors;
-            return $result;
+            // fix for offline sales not containing cost field and getting stuck
+            if (strpos($errors, "cost must be specified")!==false){
+                $this->jsonobj->cost = 0.00;
+            } else {
+                $result['error'] = $errors;
+                return $result;
+            }
         }
         // check for existing record, if record exists (it's an order), we need to clear the old data to add the most current.
         if (($sale=$this->salesMdl->getByRef($this->ref))===false){
@@ -254,7 +259,14 @@ class WposPosSale {
             $this->dt = date("Y-m-d H:i:s");
             // insert items and payments. If these fail, try to reverse the transaction; incomplete transactions should not exist
             if (!$this->insertTransactionItems() || !$this->insertTransactionPayments()) {
-                if ($this->removeTransactionRecords()) { // TODO: at the moment this deletes the transaction entry, which is bad for orders, we should keep a copy of the original json to restore from when it's an order.
+                // If the sale is a current order, roll back to previous order data, otherwise remove the sale object
+                if ($orderid>0){
+                    $this->jsonobj = json_decode($sale[0]['data']);
+                    $rollbackRes = $this->insertTransactionRecord(0, $orderid);
+                } else {
+                    $rollbackRes = $this->removeTransactionRecords();
+                }
+                if ($rollbackRes!==false) {
                     $result['error'] = "My SQL server error: the transactions did not complete successfully and has been rolled back: ".$this->itemErr.$this->paymentErr;
                 } else {
                     $result['error'] = "My SQL server error: the transaction did not complete and the changes failed to roll back please contact support to remove invalid records: ".$this->itemErr.$this->paymentErr;
@@ -270,9 +282,10 @@ class WposPosSale {
             // Create transaction history record
             WposTransactions::addTransactionHistory($this->id, $this->jsonobj->userid, "Created", "Sale created");
             // log data
-            Logger::write("Sale Processed with ref: ".$this->ref, "SALE", json_encode($this->jsonobj));
+            Logger::write("Sale Processed with ref: ".$this->ref." (ID:".$this->id.")", "SALE", json_encode($this->jsonobj));
         } else {
-            $this->removeTransactionRecords(); // TODO: at the moment this deletes the transaction entry...see above.
+            if ($orderid==0)
+                $this->removeTransactionRecords(); // This is probably not needed but oh well
             $result['error'] = "My SQL server error: the transaction did not complete successfully and has been rolled back. ".$this->salesMdl->errorInfo;
             return $result;
         }
@@ -407,13 +420,13 @@ class WposPosSale {
     private function insertTransactionRecord($status, $orderid)
     {
         if ($orderid==0){
-            if (($gid = $this->salesMdl->create($this->ref, json_encode($this->jsonobj), $status, $this->jsonobj->userid, $this->jsonobj->devid, $this->jsonobj->locid, $this->jsonobj->custid, $this->jsonobj->discount, $this->jsonobj->rounding, $this->jsonobj->total, $this->jsonobj->processdt))) {
+            if (($gid = $this->salesMdl->create($this->ref, json_encode($this->jsonobj), $status, $this->jsonobj->userid, $this->jsonobj->devid, $this->jsonobj->locid, $this->jsonobj->custid, $this->jsonobj->discount, $this->jsonobj->rounding, $this->jsonobj->cost, $this->jsonobj->total, $this->jsonobj->processdt))) {
                 return $gid;
             } else {
                 return false;
             }
         } else {
-            if ($this->salesMdl->edit($orderid, null, json_encode($this->jsonobj), $status, $this->jsonobj->userid, $this->jsonobj->devid, $this->jsonobj->locid, $this->jsonobj->custid, $this->jsonobj->discount, $this->jsonobj->total, $this->jsonobj->processdt)!==false){
+            if ($this->salesMdl->edit($orderid, null, json_encode($this->jsonobj), $status, $this->jsonobj->userid, $this->jsonobj->devid, $this->jsonobj->locid, $this->jsonobj->custid, $this->jsonobj->discount, $this->jsonobj->rounding, $this->jsonobj->cost, $this->jsonobj->total, $this->jsonobj->processdt)!==false){
                 return $orderid;
             }
         }
@@ -445,7 +458,7 @@ class WposPosSale {
                     // Create transaction history record
                     WposTransactions::addTransactionHistory($this->id, isset($_SESSION['userId'])?$_SESSION['userId']:0, "Refunded", "Sale refunded");
                     // log data
-                    Logger::write("Refund processed with ref: ".$this->ref, "REFUND", json_encode($refund));
+                    Logger::write("Refund processed with ref: ".$this->ref." (ID:".$this->id.")", "REFUND", json_encode($refund));
                 }
 
             }
@@ -471,7 +484,7 @@ class WposPosSale {
                     // Create transaction history record
                     WposTransactions::addTransactionHistory($this->id, isset($_SESSION['userId'])?$_SESSION['userId']:0, "Voided", "Sale voided");
                     // log data
-                    Logger::write("Sale voided with ref: ".$this->ref, "VOID", json_encode($this->voiddata));
+                    Logger::write("Sale voided with ref: ".$this->ref." (ID:".$this->id.")", "VOID", json_encode($this->voiddata));
                 }
             }
         }
@@ -489,7 +502,10 @@ class WposPosSale {
         //$stockMdl = new StockModel();
         $wposStock = new WposAdminStock();
         foreach ($this->jsonobj->items as $key=>$item) {
-            if (!$res=$itemsMdl->create($this->id, $item->sitemid, $item->ref, $item->qty, $item->name, $item->desc, $item->taxid, $item->tax, $item->unit, $item->price)) {
+            // fix for offline sales not containing cost field and getting stuck
+            if (!isset($item->cost)) $item->cost = 0.00;
+            $unit_original = (isset($item->unit_original) ? $item->unit_original : $item->unit);
+            if (!$res=$itemsMdl->create($this->id, $item->sitemid, $item->ref, $item->qty, $item->name, $item->desc, $item->taxid, $item->tax, $item->cost, $item->unit, $item->price, $unit_original)) {
                 $this->itemErr = $itemsMdl->errorInfo;
                 return false;
             }

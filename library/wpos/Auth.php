@@ -177,7 +177,7 @@ class Auth{
         $user = $this->authMdl->login($username, $password, true);
         if ($user==-1){
             // log data
-            Logger::write("An authentication attempt was made by ".$username." but the user has been disabled.", "AUTH");
+            Logger::write("An authentication attempt was made by ".$username." but the user has been disabled.", "AUTH", null, false);
             return -1; // the user is disabled
         }
         if (is_array($user)) {
@@ -191,21 +191,26 @@ class Auth{
                 $this->setNewSessionToken($user['id'], $user['hash']);
 
             // log data
-            Logger::write("Authentication successful for user:".$username, "AUTH");
+            Logger::write("Authentication successful for user:".$username, "AUTH", null, false);
 
             // Send to node JS
-            $socket = new WposSocketIO();
-            $socket->sendSessionData(session_id());
-            /*if (!$socket->sendSessionData(session_id())){
-                return -2;
-            }*/
+            $this->authoriseWebsocket();
+
             return true;
         } else{
             // log data
-            Logger::write("Authentication failed for user:".$username." from IP address: ".$_SERVER['REMOTE_ADDR'], "AUTH");
+            Logger::write("Authentication failed for user:".$username." from IP address: ".WposAdminUtilities::getRemoteAddress(), "AUTH", null, false);
 
             return false;
         }
+    }
+
+    /**
+     * Sends the users session_id to the node.js websocket server for client websocket authorisation.
+     */
+    public function authoriseWebsocket(){
+        $socket = new WposSocketIO();
+        return $socket->sendSessionData(session_id());
     }
 
     /**
@@ -292,6 +297,16 @@ class Auth{
     }
 
     /**
+     * @return null customer id or null on failure
+     */
+    public function getCustomerUsername(){
+        if (isset($_SESSION['cust_username'])) {
+            return $_SESSION['cust_username'];
+        }
+        return null;
+    }
+
+    /**
      * @return bool
      */
     public function isCustomerLoggedIn(){
@@ -325,7 +340,7 @@ class Auth{
         $customer=$custMdl->login($username, $password, true);
         if ($customer==-1){
             // log data
-            Logger::write("An authentication attempt was made by ".$username." but the customer has been disabled.", "AUTH");
+            Logger::write("An authentication attempt was made by ".$username." but the customer has been disabled.", "AUTH", null, false);
             return -1; // the user is disabled
         }
         if ($customer==-2){
@@ -338,12 +353,12 @@ class Auth{
             $_SESSION['cust_id']   = $customer['id'];
             $_SESSION['cust_hash'] = $customer['pass'];;
             // log data
-            Logger::write("Authentication successful for customer:".$username, "AUTH");
+            Logger::write("Authentication successful for customer:".$username, "AUTH", null, false);
 
             return true;
         } else{
             // log data
-            Logger::write("Authentication failed for customer:".$username." with hash:".$password, "AUTH");
+            Logger::write("Authentication failed for customer:".$username." from IP address: ".WposAdminUtilities::getRemoteAddress(), "AUTH", null, false);
 
             return false;
         }

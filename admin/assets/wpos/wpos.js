@@ -44,8 +44,8 @@ $(function(){
     // init
     WPOS.isLogged();
     // dev/demo quick login
-    if (document.location.host=="alpha.wallacepos.com"){
-        $("#logindiv").append('<button class="btn btn-primary btn-sm" onclick="$(\'#loguser\').val(\'admin\');$(\'#logpass\').val(\'admin\'); WPOS.login();">Dev Login</button>');
+    if (document.location.host=="demo.wallacepos.com" || document.location.host=="alpha.wallacepos.com"){
+        $("#logindiv").append('<button class="btn btn-primary btn-sm" onclick="$(\'#loguser\').val(\'admin\');$(\'#logpass\').val(\'admin\'); WPOS.login();">Demo Login</button>');
     }
 });
 function WPOSAdmin(){
@@ -85,9 +85,8 @@ function WPOSAdmin(){
                     delete splits[0];
                     //Create the params string
                     var params = splits.join('&');
-                    var query = params;
                     //Send the ajax request
-                    WPOS.loadPageContent(query);
+                    WPOS.loadPageContent(params);
                 }
             } else {
                 WPOS.goToHome();
@@ -111,7 +110,7 @@ function WPOSAdmin(){
         }
         $.get(contenturl, query, function(data){
             if (data=="AUTH"){
-                WPOS.triggerLogin();
+                WPOS.sessionExpired();
             } else {
                 $("#maincontent").html(data);
             }
@@ -142,20 +141,54 @@ function WPOSAdmin(){
     // authentication
     this.isLogged = function(){
         WPOS.util.showLoader();
-        var user = WPOS.getJsonData("hello");
-        if (user!=false){
-            if (user.isadmin==1 || (user.sections!=null && user.sections.access!='no')){
-                curuser = user;
-                WPOS.initAdmin();
-            } else {
-                alert("You do not have permission to enter this area");
+        getLoginStatus(function(user){
+            if (user!=false){
+                if (user.isadmin==1 || (user.sections!=null && user.sections.access!='no')){
+                    curuser = user;
+                    WPOS.initAdmin();
+                } else {
+                    alert("You do not have permission to enter this area");
+                }
             }
+            $('#loadingdiv').hide();
+            $('#logindiv').show();
+            $("#loginbutton").removeAttr('disabled', 'disabled');
+            WPOS.util.hideLoader();
+        });
+    };
+    function getLoginStatus(callback){
+        return WPOS.getJsonDataAsync("hello", callback);
+    }
+    var sessionTimer = null;
+    function startSessionCheck(){
+        if (sessionTimer==null){
+            sessionTimer = setInterval(startSessionCheck, 630000);
+            return;
         }
+        getLoginStatus(function(user){
+            if (user==false)
+                WPOS.sessionExpired();
+        });
+    }
+    function stopSessionCheck(){
+        clearInterval(sessionTimer);
+        sessionTimer = null;
+    }
+    function showLoginDiv(message){
+        if (message){
+            $("#login-banner-txt").text(message);
+            $("#login-banner").show();
+        } else {
+            $("#login-banner").hide();
+        }
+        $('#loginmodal').show();
+    }
+    function hideLoginDiv(){
+        $('#loginmodal').hide();
         $('#loadingdiv').hide();
         $('#logindiv').show();
         $("#loginbutton").removeAttr('disabled', 'disabled');
-        WPOS.util.hideLoader();
-    };
+    }
     this.login = function () {
         WPOS.util.showLoader();
         performLogin();
@@ -175,19 +208,20 @@ function WPOSAdmin(){
         // hash password
         password = WPOS.util.SHA256(password);
         // authenticate
-        var user = WPOS.sendJsonData("auth", JSON.stringify({username: username, password: password}));
-        if (user!==false){
-            if (user.isadmin==1 || (user.sections!=null && user.sections.access!='no')){
-                curuser = user;
-                WPOS.initAdmin();
-            } else {
-                alert("You do not have permission to enter this area");
+        WPOS.sendJsonDataAsync("auth", JSON.stringify({username: username, password: password}), function(user){
+            if (user!==false){
+                if (user.isadmin==1 || (user.sections!=null && user.sections.access!='no')){
+                    curuser = user;
+                    WPOS.initAdmin();
+                } else {
+                    alert("You do not have permission to enter this area");
+                }
             }
-        }
-        passfield.val('');
-        WPOS.util.hideLoader();
-        $(loginbtn).val('Login');
-        $(loginbtn).removeAttr('disabled', 'disabled');
+            passfield.val('');
+            WPOS.util.hideLoader();
+            $(loginbtn).val('Login');
+            $(loginbtn).removeAttr('disabled', 'disabled');
+        });
     }
     this.logout = function () {
         var answer = confirm("Are you sure you want to logout?");
@@ -200,15 +234,15 @@ function WPOSAdmin(){
         WPOS.util.showLoader();
         WPOS.stopSocket();
         WPOS.stopPageLoader();
+        stopSessionCheck();
         WPOS.getJsonData("logout");
-        $("#modaldiv").show();
+        showLoginDiv();
         WPOS.util.hideLoader();
     }
-    this.triggerLogin = function(){
+    this.sessionExpired = function(){
         WPOS.stopPageLoader();
         WPOS.stopSocket();
-        $("#modaldiv").show();
-        alert("Your session has expired, please login again.");
+        showLoginDiv("Your session has expired, please login again.");
         WPOS.util.hideLoader();
     };
     this.initAdmin = function(){
@@ -217,7 +251,8 @@ function WPOSAdmin(){
         // Load needed config
         fetchConfigTable();
         WPOS.startPageLoader();
-        $("#modaldiv").hide();
+        startSessionCheck();
+        hideLoginDiv();
     };
     function hidePermSections(){
         // hide/show settings
@@ -290,7 +325,7 @@ function WPOSAdmin(){
                 return json.data;
             } else {
                 if (errCode == "auth") {
-                    WPOS.triggerLogin();
+                    WPOS.sessionExpired();
                     return false;
                 } else {
                     alert(err);
@@ -302,6 +337,48 @@ function WPOSAdmin(){
         alert("There was an error connecting to the server: \n"+response.statusText);
         return false;
     }
+
+    this.getJsonDataAsync = function (action, callback) {
+        // send request to server
+        try {
+            $.ajax({
+                url     : "/api/"+action,
+                type    : "GET",
+                dataType: "json",
+                timeout : 10000,
+                cache   : false,
+                success : function(json){
+                    var errCode = json.errorCode;
+                    var err = json.error;
+                    if (err == "OK") {
+                        // echo warning if set
+                        if (json.hasOwnProperty('warning')){
+                            alert(json.warning);
+                        }
+                        if (callback)
+                            callback(json.data);
+                    } else {
+                        if (errCode == "auth"){
+                            WPOS.sessionExpired();
+                            return false;
+                        }
+                        alert(err);
+                        if (callback)
+                            callback(false);
+                    }
+                },
+                error   : function(jqXHR, status, error){
+                    alert(error);
+                    if (callback)
+                        callback(false);
+                }
+            });
+        } catch (ex) {
+            alert("Exception: "+ex);
+            if (callback)
+                callback(false);
+        }
+    };
 
     this.sendJsonData = function  (action, data) {
         // send request to server
@@ -330,7 +407,7 @@ function WPOSAdmin(){
                 return json.data;
             } else {
                 if (errCode == "auth") {
-                    WPOS.triggerLogin();
+                    WPOS.sessionExpired();
                     return false;
                 } else {
                     alert(err);
@@ -342,10 +419,10 @@ function WPOSAdmin(){
         return false;
     };
 
-    this.sendJsonDataAsync = function (action, data, callback) {
+    this.sendJsonDataAsync = function (action, data, callback, errorCallback) {
         // send request to server
         try {
-            var response = $.ajax({
+            $.ajax({
                 url     : "/api/"+action,
                 type    : "POST",
                 data    : {data: data},
@@ -363,20 +440,30 @@ function WPOSAdmin(){
                         callback(json.data);
                     } else {
                         if (errCode == "auth") {
-                            WPOS.triggerLogin();
-                            //callback(false);
+                            WPOS.sessionExpired();
                         } else {
+                            if (typeof errorCallback == "function")
+                                return errorCallback(json.error);
                             alert(err);
                         }
+                        callback(false);
                     }
                 },
                 error   : function(jqXHR, status, error){
+                    if (typeof errorCallback == "function")
+                        return errorCallback(error);
+
                     alert(error);
-                    //callback(false);
+                    callback(false);
                 }
             });
             return true;
         } catch (ex) {
+            if (typeof errorCallback == "function")
+                return errorCallback(error.message);
+
+            alert(ex.message);
+            callback(false);
             return false;
         }
     };
@@ -405,7 +492,7 @@ function WPOSAdmin(){
                     callback(data.data);
                 } else {
                     if (errCode == "auth") {
-                        WPOS.triggerLogin();
+                        WPOS.sessionExpired();
                         return false;
                     } else {
                         alert(err);
@@ -424,14 +511,47 @@ function WPOSAdmin(){
             }
         });
     };
+
+    // function for event source processes
+    this.startEventSourceProcess = function(url, dataCallback, errorCallback){
+        if (typeof(EventSource) === "undefined"){
+            alert("Your browser does not support EventSource, please update your browser to continue.");
+            return;
+        }
+        showModalLoader();
+        var jsonStream = new EventSource(url);
+        jsonStream.onmessage = function (e) {
+            var message = JSON.parse(e.data);
+            if (message.hasOwnProperty('error') || message.hasOwnProperty('result'))
+                jsonStream.close();
+
+            if (typeof dataCallback == "function")
+                dataCallback(message);
+        };
+        jsonStream.onerror = function(e){
+            jsonStream.close();
+            console.log("Stream closed on error");
+            if (typeof errorCallback == "function")
+                errorCallback(e);
+        }
+    };
+
     // socket control
     // Websocket updates & commands
     var socket = null;
     var socketon = false;
+    var authretry = false;
     this.startSocket = function() {
         if (socket === null){
-            socket = io.connect(window.location.protocol+'//'+window.location.hostname+'/');
+            var proxy = this.getConfigTable().general.feedserver_proxy;
+            var port = this.getConfigTable().general.feedserver_port;
+            var socketPath = window.location.protocol+'//'+window.location.hostname+(proxy==false ? ':'+port : '');
+            socket = io.connect(socketPath);
             socketon = true;
+            socket.on('connect_error', socketError);
+            socket.on('reconnect_error', socketError);
+            socket.on('error', socketError);
+
             socket.on('updates', function (data) {
                 switch (data.a) {
                     case "devices":
@@ -448,25 +568,54 @@ function WPOSAdmin(){
                         socket.emit('reg', {deviceid: 0, username: curuser.username});
                         break;
 
+                    case "config":
+                        if (data.type=="deviceconfig"){
+                            if (data.data.hasOwnProperty('a')){
+                                if (data.data.a=="removed")
+                                    delete WPOS.devices[data.id];
+                            } else {
+                                WPOS.devices[data.data.id] = data.data;
+                                WPOS.locations[data.data.locationid] = {name: data.data.locationname};
+                            }
+                        }
+                        break;
+
                     case "error":
-                        alert(data.data);
+                        if (!authretry && data.data.hasOwnProperty('code') && data.data.code=="auth"){
+                            authretry = true;
+                            WPOS.stopSocket();
+                            var result = WPOS.getJsonData('auth/websocket');
+                            if (result===true){
+                                WPOS.startSocket();
+                                return;
+                            }
+                        }
+
+                        alert(data.data.message);
                         break;
                 }
                 //alert(data.a);
             });
-            socket.on('error', function () {
-                if (socketon) // A fix for mod_proxy_wstunnel causing error on disconnect
-                    alert("Update feed could not be connected, \nyou will not receive realtime updates!");
-            });
         } else {
-            socket.socket.reconnect();
+            // This should never happen, kept for historic purposes
+            socket.connect();
         }
     };
+
+    function socketError(){
+        if (socketon) // A fix for mod_proxy_wstunnel causing error on disconnect
+            alert("Update feed could not be connected, \nyou will not receive realtime updates!");
+        socketon = false;
+        authretry = false;
+        //socket = null;
+    }
 
     this.stopSocket = function(){
         if (socket !== null){
             socketon = false;
+            authretry = false;
             socket.disconnect();
+            socket = null;
         }
     };
 
@@ -492,6 +641,10 @@ function WPOSAdmin(){
             return false;
         }
         return configtable;
+    };
+
+    this.setConfigSet = function (key, data) {
+        configtable[key] = data;
     };
 
     this.getTaxTable = function () {
@@ -527,7 +680,6 @@ function WPOSAdmin(){
     this.table2CSV = function(el) {
 
         var csvData = [];
-        var headerArr = [];
 
         //header
         var tmpRow = []; // construct header avalible array
@@ -544,34 +696,74 @@ function WPOSAdmin(){
             $(this).find('td').each(function() {
                 if (!$(this).hasClass('noexport')) tmpRow[tmpRow.length] = formatData($(this).text());
             });
-            row2CSV(tmpRow);
+            tmpRow = row2CSV(tmpRow);
+            if (tmpRow!=null)
+                csvData[csvData.length] = tmpRow;
         });
 
-        var mydata = csvData.join('\n');
-        return mydata;
+        return csvData.join('\n');
+    };
 
-        function row2CSV(tmpRow) {
-            var tmp = tmpRow.join(''); // to remove any blank rows
-            // alert(tmp);
-            if (tmpRow.length > 0 && tmp != '') {
-                var mystr = tmpRow.join(",");
-                csvData[csvData.length] = mystr;
+    this.data2CSV = function(headers, fields, data) {
+
+        var csvData = [];
+
+        //header
+        csvData[csvData.length] = row2CSV(headers);
+
+        for (var i in data){
+            if (data.hasOwnProperty(i)) {
+                var record = data[i];
+                var tmpRow = [];
+                for (var x = 0; x < fields.length; x++) {
+                    var key = fields[x];
+                    if (typeof key === 'object'){
+                        tmpRow[tmpRow.length] = formatData(key.func(record[key.key], record));
+                    } else {
+                        if (record.hasOwnProperty(key)) {
+                            tmpRow[tmpRow.length] = formatData(record[key]);
+                        } else {
+                            tmpRow[tmpRow.length] = '';
+                        }
+                    }
+                }
+                tmpRow = row2CSV(tmpRow);
+                if (tmpRow!=null)
+                    csvData[csvData.length] = tmpRow;
             }
         }
-        function formatData(input) {
-            // replace " with â€œ
-            var regexp = new RegExp(/["]/g);
-            var output = input.replace(regexp, "â€œ");
-            //HTML
-            var regexp = new RegExp(/\<[^\<]+\>/g);
-            var output = output.replace(regexp, "");
-            if (output == "") return '';
-            return '"' + output + '"';
-        }
+
+        return csvData.join('\n');
+
     };
+
+    function row2CSV(tmpRow) {
+        var tmp = tmpRow.join(''); // to remove any blank rows
+        // alert(tmp);
+        if (tmpRow.length > 0 && tmp != '') {
+            return tmpRow.join(",");
+        }
+        return null;
+    }
+
+    function formatData(input) {
+        if (typeof input === 'number')
+            return input;
+
+        if (typeof input === 'object')
+            input = JSON.stringify(input);
+        // replace " with â€œ
+        var regexp = new RegExp(/["]/g);
+        var output = input.replace(regexp, '""');
+        //HTML
+        regexp = new RegExp(/\<[^\<]+\>/g);
+        output = output.replace(regexp, "");
+        if (output == "") return '';
+        return '"' + output + '"';
+    }
 
     // Load globally accessable objects
     this.util = new WPOSUtil();
-    this.transactions = WPOSTransactions();
-    this.customers = WPOSCustomers();
+    this.transactions = new WPOSTransactions();
+    this.customers = new WPOSCustomers();
 }

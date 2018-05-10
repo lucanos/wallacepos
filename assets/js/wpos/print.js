@@ -49,7 +49,7 @@ function WPOSPrint(kitchenMode) {
             feed:4
         },
         global: {
-            recask:"print",
+            recask:"email",
             cashdraw: false,
             serviceip: "127.0.0.1",
             serviceport: 8080,
@@ -126,8 +126,11 @@ function WPOSPrint(kitchenMode) {
         } else if (doesAnyPrinterHave('method', 'wp') || doesAnyPrinterHave('method', 'ht')) {
             var receiptmethod = curset.printers['receipts'].method;
             if ((receiptmethod=="wp" || receiptmethod=="ht") || WPOS.isOrderTerminal()) {
-                if (!wpdeployed)
+                if (!wpdeployed) {
+                    if (receiptmethod=="ht")
+                        WPOS.print.setPrintSetting('receipts', 'method', 'wp');
                     deployRelayApps();
+                }
                 $("#printstat").show();
             } else {
                 $("#printstat").hide();
@@ -154,21 +157,22 @@ function WPOSPrint(kitchenMode) {
     };
 
     function disableUnsupportedMethods() {
-        if (WPOS.util.mobile) {
+        if (WPOS.util.mobile && !WPOS.util.isandroid) {
             $(".wp-option").prop("disabled", true);
         }
-        // disable http printing if not android
-        if (!WPOS.util.isandroid) {
-            $(".ht-option").prop("disabled", true);
+        if (WPOS.util.isandroid){
+            $('.psetting_type option[value="serial"]').prop("disabled", true);
         }
     }
 
     function deployRelayApps() {
-        if (WPOS.util.isandroid) {
-            webprint = new AndroidWebPrint(true, WPOS.print.printAppletReady);
-        } else {
-            webprint = new WebPrint(true, WPOS.print.populatePortsList, WPOS.print.populatePrintersList, WPOS.print.printAppletReady);
-        }
+        webprint = new WebPrint(true, {
+            relayHost: getGlobalPrintSetting('serviceip'),
+            relayPort: getGlobalPrintSetting('serviceport'),
+            listPortsCallback: WPOS.print.populatePortsList,
+            listPrinterCallback: WPOS.print.populatePrintersList,
+            readyCallback: WPOS.print.printAppletReady
+        });
         wpdeployed = true;
     }
 
@@ -380,7 +384,7 @@ function WPOSPrint(kitchenMode) {
                 alert("QZ-Print integration is no longer available, switch to the new webprint applet");
                 break;
             case "wp":
-                html = '<html><head><title>Wpos Report</title><link media="all" href="/admin/assets/css/bootstrap.min.css" rel="stylesheet"/><link media="all" rel="stylesheet" href="/admin/assets/css/font-awesome.min.css"/><link media="all" rel="stylesheet" href="/admin/assets/css/ace-fonts.css"/><link media="all" rel="stylesheet" href="admin/assets/css/ace.min.css"/></head><body style="background-color: #FFFFFF;">' + $("#reportcontain").html() + '</body></html>';
+                html = '<html><head><title>Wpos Report</title><link media="all" href="/assets/css/bootstrap.min.css" rel="stylesheet"/><link media="all" rel="stylesheet" href="/assets/css/font-awesome.min.css"/><link media="all" rel="stylesheet" href="/assets/css/ace-fonts.css"/><link media="all" rel="stylesheet" href="/assets/css/ace.min.css"/></head><body style="background-color: #FFFFFF;">' + $("#reportcontain").html() + '</body></html>';
                 webprint.printHtml(html, printer);
         }
     }
@@ -563,216 +567,22 @@ function WPOSPrint(kitchenMode) {
                 alert("QZ-Print integration is no longer available, switch to the new webprint applet");
                 return false;
             case "wp":
+            case "ht":
                 switch(getPrintSetting(printer, 'type')){
                     case "serial":
-                        webprint.printSerial(btoa(data), getPrintSetting(printer, 'port'));
+                        webprint.printSerial(data, getPrintSetting(printer, 'port'));
                         return true;
                     case "raw":
-                        webprint.printRaw(btoa(data), getPrintSetting(printer, 'printer'));
+                        webprint.printRaw(data, getPrintSetting(printer, 'printer'));
                         return true;
                     case "tcp":
-                        webprint.printTcp(btoa(data), getPrintSetting(printer, 'printerip')+":"+getPrintSetting(printer, 'printerport'));
+                        webprint.printTcp(data, getPrintSetting(printer, 'printerip')+":"+getPrintSetting(printer, 'printerport'));
                         return true;
                 }
                 return false;
-            case "ht":
-                webprint.print(data);
-                return true;
         }
         return false;
     }
-
-    // android print app methods
-    var AndroidWebPrint = function (init, readyCb) {
-
-        this.print = function (data) {
-            if (!pwindow || pwindow.closed) {
-                openPrintWindow();
-                setTimeout(function () {
-                    sendData(data);
-                }, 220);
-            }
-            sendData(data);
-        };
-
-        function sendData(data) {
-            pwindow.postMessage(encodeURIComponent(data), "*");
-            console.log(data);
-        }
-
-        var pwindow;
-
-        function openPrintWindow() {
-            pwindow = window.open("http://" + curset.serviceip + ":" + curset.serviceport + "/printwindow", 'AndroidPrintService');
-            if (pwindow)
-                pwindow.blur();
-            window.focus();
-        }
-
-        var timeOut;
-        this.checkRelay = function () {
-            if (pwindow && pwindow.open) {
-                pwindow.close();
-            }
-            window.addEventListener("message", message, false);
-            openPrintWindow();
-            timeOut = setTimeout(dispatchAndroid, 2000);
-        };
-
-        function message(event) {
-            if (event.origin != "http://" + curset.serviceip + ":" + curset.serviceport)
-                return;
-            if (event.data == "init") {
-                clearTimeout(timeOut);
-                readyCb();
-                alert("The Android print service has been loaded in a new tab, keep it open for faster printing.");
-            }
-        }
-
-        function dispatchAndroid() {
-            var answer = confirm("Would you like to open/install the printing app?");
-            if (answer) {
-                document.location.href = "https://wallaceit.com.au/playstore/httpsocketadaptor/index.php";
-            }
-        }
-
-        if (init) this.checkRelay();
-        return this;
-    };
-
-    // web print methods
-    var WebPrint = function (init, defPortCb, defPrinterCb, defReadyCb) {
-
-        this.printRaw = function (data, printer) {
-            var request = {a: "printraw", printer: printer, data: data};
-            sendAppletRequest(request);
-        };
-
-        this.printSerial = function (data, port) {
-            var request = {a: "printraw", port: port, data: data};
-            sendAppletRequest(request);
-        };
-
-        this.printTcp = function (data, socket) {
-            var request = {a: "printraw", socket: socket, data: data};
-            sendAppletRequest(request);
-        };
-
-        this.printHtml = function (data, printer) {
-            var request = {a: "printhtml", printer: printer, data: data};
-            sendAppletRequest(request);
-        };
-
-        this.openPort = function (port, settings) {
-            var request = {a: "openport", port: port, settings: {baud: settings.baud, databits: settings.databits, stopbits: settings.stopbits, parity: settings.parity, flow: settings.flow}};
-            sendAppletRequest(request);
-        };
-
-        this.requestPrinters = function () {
-            sendAppletRequest({a: "listprinters"});
-        };
-
-        this.requestPorts = function () {
-            sendAppletRequest({a: "listports"});
-        };
-
-        function sendAppletRequest(data) {
-            data.cookie = cookie;
-            if (!wpwindow || wpwindow.closed || !wpready) {
-                if (wpready){
-                    console.log("Print window not detected as open...reopening window");
-                    openPrintWindow();
-                } else {
-                    console.log("Print applet connection not established...trying to reconnect");
-                    webprint.checkRelay();
-                }
-                setTimeout(function () {
-                    wpwindow.postMessage(JSON.stringify(data), "*");
-                }, 250);
-            }
-            wpwindow.postMessage(JSON.stringify(data), "*");
-        }
-
-        var wpwindow;
-        var wpready = false;
-        function openPrintWindow() {
-            wpready = false;
-            wpwindow = window.open("http://" + curset.serviceip + ":" + curset.serviceport + "/printwindow", 'WebPrintService');
-            if (wpwindow)
-                wpwindow.blur();
-            window.focus();
-        }
-
-        var wptimeOut;
-        this.checkRelay = function () {
-            $("#printstattxt").text("Initializing...");
-            if (wpwindow && !wpwindow.closed) {
-                wpwindow.close();
-            }
-            window.addEventListener("message", handleWebPrintMessage, false);
-            openPrintWindow();
-            wptimeOut = setTimeout(dispatchWebPrint, 2500);
-        };
-
-        function handleWebPrintMessage(event) {
-            if (event.origin != "http://" + curset.serviceip + ":" + curset.serviceport)
-                return;
-            switch (event.data.a) {
-                case "init":
-                    clearTimeout(wptimeOut);
-                    wpready = true;
-                    sendAppletRequest({a:"init"});
-                    break;
-                case "response":
-                    var response = JSON.parse(event.data.json);
-                    if (response.hasOwnProperty('ports')) {
-                        if (defPortCb instanceof Function) defPortCb(response.ports);
-                    } else if (response.hasOwnProperty('printers')) {
-                        if (defPrinterCb instanceof Function)  defPrinterCb(response.printers);
-                    } else if (response.hasOwnProperty('error')) {
-                        alert(response.error);
-                    }
-                    if (response.hasOwnProperty("cookie")){
-                        cookie = response.cookie;
-                        localStorage.setItem("webprint_auth", response.cookie);
-                    }
-                    if (response.hasOwnProperty("ready")){
-                        if (defReadyCb instanceof Function){
-                            defReadyCb();
-                            defReadyCb = null;
-                        }
-                    }
-                    break;
-                case "error": // cannot contact print applet from relay window
-                    webprint.checkRelay();
-
-            }
-            //alert("The Web Printing service has been loaded in a new tab, keep it open for faster printing.");
-        }
-
-        function dispatchWebPrint() {
-            $("#printstattxt").text("Print-App Error");
-            var answer = confirm("Cannot communicate with the printing app.\nWould you like to open/install the printing app?");
-            var dlframe = $("#dlframe");
-            dlframe.attr("src", "");
-            if (answer) {
-                var installFile="WebPrint.jar";
-                if (navigator.appVersion.indexOf("Win")!=-1) installFile="WebPrint_windows_1_1.exe";
-                if (navigator.appVersion.indexOf("Mac")!=-1) installFile="WebPrint_macos_1_1.dmg";
-                if (navigator.appVersion.indexOf("X11")!=-1) installFile="WebPrint_unix_1_1.sh";
-                if (navigator.appVersion.indexOf("Linux")!=-1) installFile="WebPrint_unix_1_1.sh";
-                dlframe.attr("src", "https://content.wallaceit.com.au/webprint/"+installFile);
-            }
-        }
-
-        var cookie = localStorage.getItem("webprint_auth");
-        if (cookie==null){
-            cookie = "";
-        }
-        if (init) this.checkRelay();
-
-        return this;
-    };
 
     // ESC/P receipt generation
     var esc_init = "\x1B" + "\x40"; // initialize printer
@@ -816,6 +626,8 @@ function WPOSPrint(kitchenMode) {
         // transdetails
         cmd += (ltr ? esc_a_l : esc_a_r);
         cmd += getEscTableRow(formatLabel(translateLabel("Transaction Ref"), true, 1), record.ref, false, false, false);
+        if (record.hasOwnProperty('id') && WPOS.getConfigTable().pos.recprintid)
+            cmd += getEscTableRow(formatLabel(translateLabel("Transaction ID"), true, 2), record.id, false, false, false);
         cmd += getEscTableRow(formatLabel(translateLabel("Sale Time"), true, 7), WPOS.util.getDateFromTimestamp(record.processdt), false, false, false) + "\n";
         // items
         var item;
@@ -832,6 +644,9 @@ function WPOSPrint(kitchenMode) {
             cmd += getEscTableRow(itemlabel, WPOS.util.currencyFormat(item.price, false, true), false, false, true);
             if (lang=="mixed" && item.alt_name!=""){
                 cmd += (ltr?'    ':'') + convertUnicodeCharacters(item.alt_name, getGlobalPrintSetting('alt_charset'), getGlobalPrintSetting('alt_codepage')) + (!ltr?'    ':'') + "\n";
+            }
+            if (item.desc!="" && WPOS.getConfigTable().pos.hasOwnProperty('recprintdesc') && WPOS.getConfigTable().pos.recprintdesc){
+                cmd += (ltr?'    ':'') + convertUnicodeCharacters(item.desc, getGlobalPrintSetting('alt_charset'), getGlobalPrintSetting('alt_codepage')) + (!ltr?'    ':'') + "\n";
             }
             if (item.hasOwnProperty('mod')){
                 for (var x=0; x<item.mod.items.length; x++){
@@ -1331,6 +1146,7 @@ function WPOSPrint(kitchenMode) {
             return;
         }
         var temp_data = {
+            sale_id: record.id,
             sale_ref: record.ref,
             sale_dt: WPOS.util.getDateFromTimestamp(record.processdt),
             sale_items: record.items,
@@ -1348,6 +1164,8 @@ function WPOSPrint(kitchenMode) {
             logo_url: document.location.protocol+"//"+document.location.host+config.pos.recemaillogo,
             footer: config.pos.recfooter,
             thermalprint: escpprint,
+            print_id: config.pos.recprintid,
+            print_desc: config.pos.recprintdesc,
             qrcode_url: config.pos.recqrcode!=""?document.location.protocol+"//"+document.location.host+"/docs/qrcode.png":null,
             currency: function() {
                 return function (text, render) {

@@ -51,27 +51,31 @@
     <script type="text/javascript" src="/assets/js/wpos/print.js"></script>
     <script type="text/javascript" src="/assets/js/wpos/orders.js"></script>
     <script type="text/javascript" src="/assets/js/wpos/utilities.js"></script>
+    <script type="text/javascript" src="/assets/libs/webprint.js"></script>
     <!-- Websocket library -->
-    <script type="text/javascript" src="/assets/libs/socketio/socket.io.min.js"></script>
+    <script type="text/javascript" src="/assets/libs/socketio/socket.io-1.4.5.js"></script>
     <!-- POS Keypad -->
     <link type="text/css" href="/assets/libs/jquery-keypad/jquery.keypad.css" rel="stylesheet">
     <script type="text/javascript" src="/assets/libs/jquery-keypad/jquery.plugin.min.js"></script>
     <script type="text/javascript" src="/assets/libs/jquery-keypad/jquery.keypad.min.js"></script>
     <!-- Datatables -->
     <script src="/assets/libs/datatables/datatables.min.js"></script>
-    <!--<script src="/admin/assets/js/datatableSorting.js"></script>-->
+    <script src="/assets/libs/datatables/datatableSorting.js"></script>
 
 </head>
-<body>
+<body style="overflow: hidden;">
 <div id="wrapper">
 <ul class="navbar overflow-hidden">
     <li onclick="setItemListPadding();"><a href="#tabs-1">Till</a></li>
     <li onclick="WPOS.trans.setupTransactionView();"><a href="#tabs-2">Sales</a></li>
     <li onclick="WPOS.reports.populateOverview();"><a href="#tabs-3">Reports</a></li>
     <li><a href="#tabs-4">Settings</a></li>
-    <button onClick="WPOS.logout();" style="float:right; height: 45px;" class="btn">Logout</button>
-    <button title="Expand window" id="window_width_toggle" onClick="expandWindow();" style="float:right; vertical-align: middle; margin-top: 10px; margin-right: 5px; margin-left: 5px;" class="btn btn-xs btn-primary"><i class="icon icon-expand"></i></button>
-    <button title="Open Administration Dashboard" onClick="window.open('/admin');" style="float:right; vertical-align: middle; margin-top: 10px; margin-right: 5px; margin-left: 5px;" class="btn btn-xs btn-primary"><i class="icon icon-cog">&nbsp;Admin</i></button>
+    <button onClick="WPOS.logout();" style="float:right; height: 45px; padding: 6px 8px;" class="btn logout_btn"><i class="glyphicon glyphicon-log-out"></i>Logout</button>
+    <div style="float:right; vertical-align: middle; margin-top: 10px; text-align: right;">
+        <button title="Open Administration Dashboard" onClick="window.open('/admin');" style="margin-right: 4px; margin-left: 4px;" class="btn btn-xs btn-primary"><i class="icon icon-cog">&nbsp;Admin</i></button>
+        <button title="Lock terminal or switch user" id="switch_user_btn" onClick="WPOS.lockSession();" style="margin-right: 4px; margin-left: 4px;" class="btn btn-xs btn-primary"><i class="icon icon-lock"></i>&nbsp;Lock</button>
+        <button title="Expand window" id="window_width_toggle" onClick="expandWindow();" style="margin-right: 4px; margin-left: 6px;" class="btn btn-xs btn-primary"><i class="icon icon-expand"></i></button>
+    </div>
 </ul>
 <div id="tabs-1">
     <div id="sales">
@@ -114,12 +118,13 @@
                     </tbody>
                 </table>
                 </div>
-                <span id="invaliditemnotice" style="float: left; display: none;" class="text-warning bigger-110 red"><i
-                        class="icon-warning-sign"></i>Invalid items marked in red will not be added to the sale</span>
+                <span id="invaliditemnotice" style="float: left; display: none;" class="text-warning bigger-110 red">
+                    <i class="icon-warning-sign"></i>&nbsp;Invalid items marked in red will not be added to the sale
+                </span>
                 <button style="float:right; font-size: 14px !important; margin-top:10px;" class="btn btn-sm btn-primary" onClick="WPOS.items.addManualItemRow();">Add Item</button>
             </div>
             <div id="totals">
-                <div style="display:inline-block; max-width:450px; vertical-align:top;">
+                <div id="totals-container">
                     <div class="totalsbox">
                         <div>
                             <div class="totalslabel">Subtotal:</div>
@@ -168,7 +173,7 @@
                         </tr>
                     </table>
                 </div>
-                <div id="regkey-container">
+                <div id="regkey-container" class="pull-right">
                         <div id="regkey-inner">
                         <div id="registerkeydiv">
                             <button class="regbtn btn btn-success" onClick="WPOS.sales.showPaymentDialog();">Process
@@ -201,8 +206,8 @@
     <div id="remtransearch">
         <label>Global Ref Lookup:</label><br/>
         <label>Reference: <input id="remsearchref" type="text"/></label>
-        <button onclick="WPOS.trans.searchRemote();" class="btn btn-sm btn-primary">Go</button>
-        <button onclick="WPOS.trans.clearSearch();" class="btn btn-sm btn-warning">X</button>
+        <button onclick="WPOS.trans.searchRemote();" class="btn btn-sm btn-primary" style="vertical-align:top;">Go</button>
+        <button onclick="WPOS.trans.clearSearch();" class="btn btn-sm btn-warning" style="vertical-align:top;">X</button>
     </div>
     <table id="transactiontable" style="text-align: left; width:100%;" class="table table-striped table-bordered table-hover dt-responsive">
         <thead class="table-header">
@@ -415,6 +420,45 @@
                     <div class="widget-body" style="padding-top: 10px; text-align: left;">
                         <label>Use On-screen keypad: <input id="keypadset" type="checkbox" style="vertical-align: top;" onclick="WPOS.setLocalConfigValue('keypad', $('#keypadset').is(':checked'))"></label>
                     </div>
+                    <div class="widget-header widget-header-flat">
+                        <h4 class="lighter">
+                            <i class="icon-link"></i>
+                            Registration
+                        </h4>
+                    </div>
+                    <div class="widget-body" style="padding-top: 10px; text-align: left;">
+                        <table class="table tab-pane">
+                            <tr>
+                                <td>Device ID: </td>
+                                <td class="device_id"></td>
+                            </tr>
+                            <tr>
+                                <td>Device Name: </td>
+                                <td class="device_name"></td>
+                            </tr>
+                            <tr>
+                                <td>Location Name: </td>
+                                <td class="location_name"></td>
+                            </tr>
+                            <tr>
+                                <td>Registration ID: </td>
+                                <td class="devicereg_id"></td>
+                            </tr>
+                            <tr>
+                                <td>Registration UUID: </td>
+                                <td class="devicereg_uuid"></td>
+                            </tr>
+                            <tr>
+                                <td>Registration DT: </td>
+                                <td class="devicereg_dt"></td>
+                            </tr>
+                        </table>
+                        <button id="backup_btn" class="btn-xs btn-success" onclick="WPOS.backupOfflineSales();">Backup Offline Sales</button>
+                        <button class="btn-xs btn-warning" onclick="WPOS.resetLocalConfig();">Reset Local Config</button>
+                        <button class="btn-xs btn-danger" onclick="WPOS.clearLocalData();">Clear Local Data</button>
+                        <button class="btn-xs btn-primary" onclick="WPOS.refreshRemoteData();">Refresh Remote Data</button>
+                        <button class="btn-xs btn-danger" onclick="WPOS.removeDeviceRegistration();">Remove Device Registration</button>
+                    </div>
                 </div>
             </div>
             <div id="settings-tab-2" class="tab-pane fade">
@@ -466,9 +510,6 @@
                                                         </option>
                                                         <option value="wp" class="wp-option">
                                                             Web Print ESCP
-                                                        </option>
-                                                        <option value="ht" class="ht-option">
-                                                            Android HTTP ESCP
                                                         </option>
                                                     </select>
                                                 </label>
@@ -663,9 +704,6 @@
                                         <option value="wp" class="wp-option">
                                             Web Print ESCP
                                         </option>
-                                        <option value="ht" class="ht-option">
-                                            Android HTTP ESCP
-                                        </option>
                                     </select>
                                 </label>
                             </div>
@@ -824,25 +862,34 @@
         </div>
     </div>
 </div>
-<div id="statusbar" style="width:100%; position:absolute; bottom:0; height:40px; background-color:#666666; padding-top: 10px;">
-    <div id="printstat" style="float:left; height: 30px; vertical-align: middle; margin-left: 5px; margin-right: 5px;">
-        <i class="icon-print icon-large white"></i>&nbsp;<span id="printstattxt" class="white">Initializing...</span>
+<div id="statusbar" style="width:100%; position:absolute; bottom:0; min-height:40px; background-color:#666666; padding-top: 10px;">
+    <div class="col-sm-3 col-xs-6" style="vertical-align: middle;">
+        <div id="printstat">
+            <i class="icon-print icon-large white" style="margin-right: 5px;"></i>&nbsp;<span id="printstattxt" class="white">Initializing...</span>
+        </div>
     </div>
-    <div id="wposstat" style="float:right; height: 30px; vertical-align: middle;">
+    <div id="wposstat" class="col-sm-3 col-sm-push-6 col-xs-6 text-right">
         <span id="wposstattxt" class="white">WPOS is Online</span>
-        <span id="wposstaticon" class="badge badge-success" style="margin-left: 5px; margin-right: 5px;"><i class="icon-ok"></i></span>
+        <span id="wposstaticon" class="badge badge-success" style="margin-left: 5px;"><i class="icon-ok"></i></span>
+    </div>
+    <div class="col-sm-6 col-sm-pull-3 text-center white" style="padding-bottom: 10px;">
+        <span class="biz_name"></span> - <span class="device_name"></span> - <span class="location_name"></span>
     </div>
 </div><iframe id="dlframe" style="width: 1px;height: 1px; border: 0; position: absolute; bottom: 0; left: 0; z-index: -1;"></iframe>
 </div>
-<div id="modaldiv" class="login-layout" style="background-color:#000000; z-index: 1000;">
+<div id="loginmodal" class="login-layout">
     <div id="loginbox" class="login-box widget-box visible no-border">
         <div class="widget-main">
             <h2 class="header blue lighter bigger">
                 <img style="height: 40px; margin-top: -5px;" src="/assets/images/apple-touch-icon-72x72.png">&nbsp;WallacePOS
             </h2>
-            <div class="space-6"></div>
-            <div class="space-6"></div>
-            <div id="logindiv" style="display: none; height: 240px;">
+            <div class="space-2"></div>
+            <div id="login-banner" class="alert alert-block alert-success" style="display:none;">
+                <i class="icon icon-lock green" style="margin-right: 3px;"></i>
+                <span id="login-banner-txt"></span>
+            </div>
+            <div class="space-10"></div>
+            <div id="logindiv" style="display: none;">
                 <label class="block clearfix">
                     <span class="block input-icon input-icon-right">
                         <input class="form-control" id="username" name="username" type="text" placeholder="Username"/>
@@ -1071,7 +1118,7 @@
         </table>
     </div>
 </div>
-<div id="setupdiv" style="display:none; padding:5px; z-index: 3100;" title="Initial Device Setup">
+<div id="setupdiv" style="display:none; padding:5px;" title="Initial Device Setup">
     <div style="display: inline-block; margin-bottom: 10px;">
         Select a device to merge with or enter a new device name<br/>
         <label>Existing device:</label><br/>
@@ -1139,6 +1186,10 @@
     <label class="fixedlabel">
         Alt Name:<br/>
         <input type="text" id="itemaltname"/>
+    </label><br/>
+    <label class="fixedlabel">
+        Cost:<br/>
+        <input type="text" id="itemcost" class="numpad"/>
     </label><br/>
     <label class="fixedlabel">Modifiers: </label>
     <table class="table table-stripped table-responsive">

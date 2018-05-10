@@ -1,6 +1,23 @@
 <?php
-require $_SERVER['DOCUMENT_ROOT'].$_SERVER['APP_ROOT']."library/elephantio/Client.php";
-use ElephantIO\Client as Elephant;
+/*require_once($_SERVER['DOCUMENT_ROOT'].$_SERVER['APP_ROOT']."library/elephantio/Client.php");
+require_once($_SERVER['DOCUMENT_ROOT'].$_SERVER['APP_ROOT']."library/elephantio/EngineInterface.php");
+require_once($_SERVER['DOCUMENT_ROOT'].$_SERVER['APP_ROOT']."library/elephantio/AbstractPayload.php");
+require_once($_SERVER['DOCUMENT_ROOT'].$_SERVER['APP_ROOT']."library/elephantio/Exception/SocketException.php");
+require_once($_SERVER['DOCUMENT_ROOT'].$_SERVER['APP_ROOT']."library/elephantio/Exception/MalformedUrlException.php");
+require_once($_SERVER['DOCUMENT_ROOT'].$_SERVER['APP_ROOT']."library/elephantio/Exception/ServerConnectionFailureException.php");
+require_once($_SERVER['DOCUMENT_ROOT'].$_SERVER['APP_ROOT']."library/elephantio/Exception/UnsupportedActionException.php");
+require_once($_SERVER['DOCUMENT_ROOT'].$_SERVER['APP_ROOT']."library/elephantio/Exception/UnsupportedTransportException.php");
+require_once($_SERVER['DOCUMENT_ROOT'].$_SERVER['APP_ROOT']."library/elephantio/Engine/AbstractSocketIO.php");
+require_once($_SERVER['DOCUMENT_ROOT'].$_SERVER['APP_ROOT']."library/elephantio/Engine/SocketIO/Session.php");
+require_once($_SERVER['DOCUMENT_ROOT'].$_SERVER['APP_ROOT']."library/elephantio/Engine/SocketIO/Version0X.php");
+require_once($_SERVER['DOCUMENT_ROOT'].$_SERVER['APP_ROOT']."library/elephantio/Engine/SocketIO/Version1X.php");
+require_once($_SERVER['DOCUMENT_ROOT'].$_SERVER['APP_ROOT']."library/elephantio/Payload/Decoder.php");
+require_once($_SERVER['DOCUMENT_ROOT'].$_SERVER['APP_ROOT']."library/elephantio/Payload/Encoder.php");*/
+
+require $_SERVER['DOCUMENT_ROOT'].$_SERVER['APP_ROOT']."library/autoload.php";
+
+use ElephantIO\Client as Client;
+use ElephantIO\Engine\SocketIO\Version1X as Version1X;
 /**
  * WposSocketIO is part of Wallace Point of Sale system (WPOS) API
  *
@@ -33,18 +50,37 @@ class WposSocketIO {
     /**
      * @var string This hashkey provides authentication for php operations
      */
-    private $hashkey = "dgqsy8DgvyKl6RhCngOuFzNosbnThPZnMHCpZZm58GGb7Nnr2Y1tzVVudRBAj1ad";
+    private $hashkey = "5d40b50e172646b845640f50f296ac3fcbc191a7469260c46903c43cc6310ace";
 
     /**
      * Initialise the elephantIO object and set the hashkey
      */
     function __construct(){
+        $conf = WposAdminSettings::getConfigFileValues(true);
+        if (isset($conf->feedserver_key))
+            $this->hashkey = $conf->feedserver_key;
 
-        $this->elephant = new Elephant('http://127.0.0.1:8080', 'socket.io', 1, false, true, true);
-        $this->elephant->setHandshakeQuery([
-            'hashkey' => $this->hashkey
-        ]);
+        $this->elephant = new Client(new Version1X('http://127.0.0.1:'.$conf->feedserver_port.'/?hashkey='.$this->hashkey));
+    }
 
+    /**
+     * Sends session updates to the node.js feed server, optionally removing the corresponding session
+     * @param $event
+     * @param $data
+     * @return bool
+     */
+    private function sendData($event, $data){
+        set_error_handler(function() { /* ignore warnings */ }, E_WARNING);
+        try {
+            $this->elephant->initialize();
+            $this->elephant->emit($event, $data);
+            $this->elephant->close();
+        } catch(Exception $e){
+            restore_error_handler();
+            return false;
+        }
+        restore_error_handler();
+        return true;
     }
 
     /**
@@ -54,52 +90,23 @@ class WposSocketIO {
      * @return bool
      */
     public function sendSessionData($data, $remove = false){
-        try {
-            $this->elephant->init();
-            $this->elephant->send(
-                ElephantIO\Client::TYPE_EVENT,
-                null,
-                null,
-                json_encode(['name' => 'session', 'args' => ['hashkey'=>$this->hashkey, 'data'=>$data, 'remove'=>$remove]])
-            );
-            $this->elephant->close();
-        } catch(Exception $e){
-            return false;
-        }
-        return true;
+
+        return $this->sendData('session', ['hashkey'=>$this->hashkey, 'data'=>$data, 'remove'=>$remove]);
     }
 
     /**
-     * Broadcast a message to all authenticated devices
-     * REDUNDANT Is it used anywhere?
-     * @param $data
+     * Generate a random hashkey for php -> node.js authentication
      * @return bool
      */
-    private function sendBroadcastData($data){
-        // sends message to all connected devices, even if not authenticate
-        // this is redundant because of new session sharing
-        try {
-            $this->elephant->init();
-            $this->elephant->send(
-                ElephantIO\Client::TYPE_EVENT,
-                null,
-                null,
-                json_encode(['name' => 'broadcast', 'args' => $data])
-            );
-            $this->elephant->close();
-        } catch(Exception $e){
-            return false;
-        }
-        return true;
-    }
+    public function generateHashKey(){
+        $key = hash('sha256', WposAdminUtilities::getToken(256));
+        WposAdminSettings::setConfigFileValue('feedserver_key', $key);
 
-    /**
-     * Broadcast a message to all connected/authenticated devices except the admin dash
-     * @param $message
-     * @return bool
-     */
-    public function sendBroadcastMessage($message){
-        return $this->sendBroadcastData(['a' => 'msg', 'data' => $message]);
+        $socket = new WposSocketControl();
+        if ($socket->isServerRunning())
+            $this->sendData('hashkey', ['hashkey'=>$this->hashkey, 'newhashkey'=>$key]);
+
+        return;
     }
 
     /**
@@ -108,11 +115,8 @@ class WposSocketIO {
      * @return bool
      */
     public function sendResetCommand($devices=null){
-        if ($devices==null){
-           return  $this->sendBroadcastData(['a'=>'reset']);
-        } else {
-            return $this->sendDataToDevices(['a'=>'reset'], $devices);
-        }
+
+        return $this->sendDataToDevices(['a'=>'reset'], $devices);
     }
 
     /**
@@ -123,19 +127,7 @@ class WposSocketIO {
      */
     private function sendDataToDevices($data, $devices=null){
         // sends message to all authenticated devices
-        try {
-            $this->elephant->init();
-            $this->elephant->send(
-                ElephantIO\Client::TYPE_EVENT,
-                null,
-                null,
-                json_encode(['name' => 'send', 'args' => ['hashkey'=>$this->hashkey, 'include'=>$devices, 'data'=>$data]])
-            );
-            $this->elephant->close();
-        } catch(Exception $e){
-            return false;
-        }
-        return true;
+        return $this->sendData('send', ['hashkey'=>$this->hashkey, 'include'=>$devices, 'data'=>$data]);
     }
 
     /**
@@ -162,10 +154,9 @@ class WposSocketIO {
     /**
      * Broadcast a customer addition/update/delete to all connected devices.
      * @param $customer
-     * @param int $senddev
      * @return bool
      */
-    public function sendCustomerUpdate($customer, $senddev = 0){
+    public function sendCustomerUpdate($customer){
 
         return $this->sendDataToDevices(['a' => 'customer', 'data' => $customer], null);
     }
@@ -194,12 +185,9 @@ class WposSocketIO {
     /**
      * Send updated device specific config
      * @param $newconfig
-     * @param $configset; the set name for the values
      * @return bool
      */
-    public function sendDeviceConfigUpdate($id, $newconfig){
-        $ids = new stdClass();
-        $ids->{$id} = $id;
-        return $this->sendDataToDevices(['a' => 'config', 'type' => 'deviceconfig', 'data' => $newconfig], $ids);
+    public function sendDeviceConfigUpdate($newconfig){
+        return $this->sendDataToDevices(['a' => 'config', 'type' => 'deviceconfig', 'data' => $newconfig], null);
     }
 }

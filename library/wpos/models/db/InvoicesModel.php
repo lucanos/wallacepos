@@ -122,7 +122,7 @@ class InvoicesModel extends TransactionsModel
      * @param int $offset
      * @return array|bool Returns false on an unexpected failure or the rows found by the statement. Returns an empty array when nothing is found
      */
-    public function get($custId = null, $limit = 0, $offset = 0)
+    public function get($custId = null, $ref = null, $searchref = false, $limit = 0, $offset = 0)
     {
         $sql = 'SELECT * FROM sales';
         $placeholders = [];
@@ -134,6 +134,20 @@ class InvoicesModel extends TransactionsModel
             }
             $sql .= ' custid = :custid';
             $placeholders[':custid'] = $custId;
+        }
+        if ($ref !== null) {
+            if (empty($placeholders)) {
+                $sql .= ' WHERE';
+            } else {
+                $sql .= ' AND';
+            }
+            if ($searchref){
+                $sql .= ' ref LIKE :ref';
+                $placeholders[':ref'] = '%'.$ref.'%';
+            } else {
+                $sql .= ' ref= :ref';
+                $placeholders[':ref'] = $ref;
+            }
         }
         // just get sale transactions
         if (empty($placeholders)) {
@@ -171,10 +185,12 @@ class InvoicesModel extends TransactionsModel
      * @param bool $includeorders
      * @return array|bool Returns false on failure or an array with sales on success
      */
-    public function getRange($stime, $etime, $deviceids=null, $status=null, $statparity=true, $includeorders=true){
+    public function getRange($stime, $etime=null, $deviceids=null, $status=null, $statparity=true, $includeorders=true){
 
         $placeholders = [":stime"=>$stime, ":etime"=>$etime];
-        $sql = 'SELECT s.* FROM sales as s LEFT JOIN sale_voids as v ON s.id=v.saleid WHERE ((s.processdt>= :stime AND s.processdt<= :etime) OR (v.processdt>= :stime AND v.processdt<= :etime))';
+        if ($etime!=null)
+            $placeholders[":etime"] = $etime;
+        $sql = 'SELECT s.* FROM sales as s LEFT JOIN sale_voids as v ON s.id=v.saleid WHERE ((s.processdt>= :stime'.($etime!=null?' AND s.processdt<= :etime':'').') OR (v.processdt>= :stime'.($etime!==null?' AND v.processdt<= :etime':'').'))';
 
         if ($deviceids !== null) {
             if (is_array($deviceids)){
@@ -216,7 +232,7 @@ class InvoicesModel extends TransactionsModel
      * @param null $custid
      * @return bool|int Returns false on failure or number of rows affected on success
      */
-    public function edit($saleid=null, $saleref=null, $data, $status = null, $discount=null, $total=null, $balance=null, $processdt=null, $duedt=null, $userid=null, $devid=null, $locid=null, $custid=null){
+    public function edit($saleid=null, $saleref=null, $data, $status = null, $discount=null, $cost=null, $total=null, $balance=null, $processdt=null, $duedt=null, $userid=null, $devid=null, $locid=null, $custid=null){
         if (!is_numeric($saleid) && ($saleref==null || $saleref=="")){ return false; }
         $sql = "UPDATE sales SET data= :data";
         $sqlcond = ""; // conditions to preprend
@@ -260,6 +276,10 @@ class InvoicesModel extends TransactionsModel
         if ($discount !== null) {
             $sql .= ', discount= :discount';
             $placeholders[':discount'] = $discount;
+        }
+        if ($cost !== null) {
+            $sql .= ', cost= :cost';
+            $placeholders[':cost'] = $cost;
         }
         if ($total !== null) {
             $sql .= ', total= :total';

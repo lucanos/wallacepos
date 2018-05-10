@@ -100,6 +100,8 @@ class WposAdminStats {
 
         // calc total takings
         $stats->totaltakings = round($stats->saletotal - $stats->refundtotal, 2);
+        $stats->cost = round($sales[0]['ctotal'], 2);
+        $stats->profit = round($stats->totaltakings - $stats->cost, 2);
         $stats->refs = [];
         $temprefs = $stats->salerefs.($stats->voidrefs!=null?(','.$stats->voidrefs):'').($stats->refundrefs!=null?(','.$stats->refundrefs):'');
         $temprefs = explode(',', $temprefs);
@@ -207,6 +209,8 @@ class WposAdminStats {
                 }
                 $stats[$item['groupid']]->refs = $item['refs'];
                 $stats[$item['groupid']]->soldqty = $item['itemnum'];
+                $stats[$item['groupid']]->discounttotal = number_format($item['discounttotal'], 2, ".", "");
+                $stats[$item['groupid']]->taxtotal = number_format($item['taxtotal'], 2, ".", "");
                 $stats[$item['groupid']]->soldtotal = number_format($item['itemtotal'], 2, ".", "");
                 $stats[$item['groupid']]->refundqty = $item['refnum'];
                 $stats[$item['groupid']]->refundtotal = number_format($item['reftotal'], 2, ".", "");

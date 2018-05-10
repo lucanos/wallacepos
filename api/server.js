@@ -11,8 +11,17 @@
 };*/
 var http = require('http');
 var app = http.createServer(wshandler);
+var fs = require('fs');
+var config = null;
+var configpath = __dirname+'/../docs/.config.json';
 
-app.listen(8080, '127.0.0.1');
+if (fs.existsSync(configpath))
+    config = JSON.parse(fs.readFileSync(configpath, 'utf8'));
+var port = (config && config.hasOwnProperty('feedserver_port')) ? config.feedserver_port : 8080;
+var ip = (!config || config.feedserver_proxy) ? '127.0.0.1' : '0.0.0.0';
+var hashkey = (config && config.hasOwnProperty('feedserver_key')) ? config.feedserver_key : "5d40b50e172646b845640f50f296ac3fcbc191a7469260c46903c43cc6310ace"; // key for php interaction, provides extra security
+
+app.listen(port, ip);
 
 io = require('socket.io').listen(app);
 
@@ -22,8 +31,6 @@ function wshandler(req, res) {
 
 var devices = {};
 var sessions = {};
-
-var hashkey = "dgqsy8DgvyKl6RhCngOuFzNosbnThPZnMHCpZZm58GGb7Nnr2Y1tzVVudRBAj1ad"; // key for php interaction, provides extra security
 
 io.sockets.on('connection', function (socket) {
     // START AUTHENTICATION
@@ -48,9 +55,9 @@ io.sockets.on('connection', function (socket) {
         }
     }
     // check for hashkey (for php authentication)
-    if (cookies == null) {
+    if (!authed) {
         if (socket.handshake.query.hasOwnProperty('hashkey')) {
-            if ((hashkey == socket.handshake.query.hashkey) && (socket.handshake.address.address=="127.0.0.1")) {
+            if ((hashkey == socket.handshake.query.hashkey) && (socket.request.connection.remoteAddress=="127.0.0.1")) {
                 authed = true;
                 console.log("Authorised by hashkey: " + socket.handshake.query.hashkey);
             }
@@ -58,7 +65,7 @@ io.sockets.on('connection', function (socket) {
     }
     // Disconnect if not authenticated
     if (!authed) {
-        socket.emit('updates', {a: "error", data: "Socket authentication failed!"});
+        socket.emit('updates', {a: "error", data: {code: "auth", message: "Socket authentication failed!"}});
         socket.disconnect();
     }
 
@@ -73,7 +80,7 @@ io.sockets.on('connection', function (socket) {
         var inclall = data.include == null;
         for (var i in devices) {
             if (inclall || (data.include.hasOwnProperty(i) > 0)) {
-                io.sockets.socket(devices[i].socketid).emit('updates', data.data);
+                io.sockets.connected[devices[i].socketid].emit('updates', data.data);
             } else {
                 console.log(i + " not in devicelist, " + JSON.stringify(data.include) + "; discarding.");
             }
@@ -81,7 +88,7 @@ io.sockets.on('connection', function (socket) {
         // send to the admin dash
         if (devices.hasOwnProperty(0)) {
             // send updated device list to admin dash
-            io.sockets.socket(devices[0].socketid).emit('updates', data.data);
+            io.sockets.connected[devices[0].socketid].emit('updates', data.data);
         }
     });
 
@@ -102,6 +109,15 @@ io.sockets.on('connection', function (socket) {
         }
     });
 
+    socket.on('hashkey', function (data) {
+        // check for hashkey
+        if (hashkey == data.hashkey) {
+            hashkey = data.newhashkey;
+        } else {
+            console.log("Send request not processed, no valid hashkey!");
+        }
+    });
+
     // register device details
     socket.on('reg', function (request) {
         // register device
@@ -114,13 +130,13 @@ io.sockets.on('connection', function (socket) {
             if (request.deviceid != 0) {
                 if (devices.hasOwnProperty(0)) {
                     // send updated device list to admin dash
-                    io.sockets.socket(devices[0].socketid).emit('updates', {a: "devices", data: JSON.stringify(devices)});
+                    io.sockets.connected[devices[0].socketid].emit('updates', {a: "devices", data: JSON.stringify(devices)});
                 }
             }
         });
         if (devices.hasOwnProperty(0)) {
             // send updated device list to admin dash
-            io.sockets.socket(devices[0].socketid).emit('updates', {a: "devices", data: JSON.stringify(devices)});
+            io.sockets.connected[devices[0].socketid].emit('updates', {a: "devices", data: JSON.stringify(devices)});
         }
         console.log("Device registered");
     });

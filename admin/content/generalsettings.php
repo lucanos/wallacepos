@@ -52,10 +52,10 @@
                             <option value="₣">₣ Franc</option>
                             <option value="₤">₤ Lira</option>
                             <option value="﷼">﷼ Saudi Riyal</option>
-                            <!--<option value="₧">₧ Peseta</option> ! Encoding issues -->
-                            <!--<option value="₹">₹ Indian Rupee</option> ! Encoding issues -->
-                            <!--<option value="₨">₨ Rupee</option> ! Encoding issues -->
-                            <!--<option value="₩">₩ Won</option> ! Encoding issues -->
+                            <option value="₧">₧ Peseta</option>
+                            <option value="₹">₹ Indian Rupee</option>
+                            <option value="₨">₨ Rupee</option>
+                            <option value="₩">₩ Won</option>
                             <option value="₴">₴ Hryvnia</option>
                             <option value="₯">₯ Drachma</option>
                             <option value="₮">₮ Tugrik</option>
@@ -66,7 +66,7 @@
                             <option value="₭">₭ Kip</option>
                             <option value="₪">₪ New Sheqel</option>
                             <option value="₫">₫ Dong</option>
-                            <!--<option value="៛">៛ Riel</option> ! Encoding issues -->
+                            <option value="៛">៛ Riel</option>
                             <option value="Rp">Rp Rupiah</option>
                             <option value="kr">kr Krone/Kroon/Krona</option>
                             <option value="Kč">Kč Koruna</option>
@@ -173,6 +173,11 @@
                     <div class="form-group">
                         <div class="col-sm-5"><label>Transaction Reference:</label></div>
                         <div class="col-sm-5"><input type="text" id="altlabel_transaction-ref" /></div>
+                    </div>
+                    <div class="space-4"></div>
+                    <div class="form-group">
+                        <div class="col-sm-5"><label>Transaction ID:</label></div>
+                        <div class="col-sm-5"><input type="text" id="altlabel_transaction-id" /></div>
                     </div>
                     <div class="space-4"></div>
                     <div class="form-group">
@@ -387,7 +392,10 @@
         data['altlabels'] = altlabels;
         data['gcontact'] = $("#gcontact").is(":checked")?1:0;
         data['email_tls'] = $("#email_tls").is(":checked");
-        WPOS.sendJsonData("settings/general/set", JSON.stringify(data));
+        var result = WPOS.sendJsonData("settings/general/set", JSON.stringify(data));
+        if (result !== false){
+            WPOS.setConfigSet('general', result);
+        }
         // hide loader
         WPOS.util.hideLoader();
     }

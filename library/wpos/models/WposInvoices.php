@@ -97,7 +97,7 @@ class WposInvoices {
 
     public function getInvoices($result){
         // if range is not set, use the default
-        if (!isset($this->data->stime) || !isset($this->data->etime)){
+        if (!isset($this->data->stime) && !isset($this->data->etime)){
             $this->data->etime = time()*1000;
             $this->data->stime = strtotime("-1 month")*1000;
         }
@@ -117,6 +117,30 @@ class WposInvoices {
             }
             $result['data'] = $invoicedata;
         }
+        return $result;
+    }
+
+    /**
+     * Searches sales for the given reference.
+     * @param $searchdata
+     * @param $result
+     * @return mixed Returns sales that match the specified ref.
+     */
+    public function searchInvoices($searchdata, $result)
+    {
+        $salesMdl = new InvoicesModel();
+        $dbSales  = $salesMdl->get(null, $searchdata->ref, true);
+        if (is_array($dbSales)) {
+            $sales = [];
+            foreach ($dbSales as $sale) {
+                $jsonObj             = json_decode($sale['data'], true);
+                $sales[$sale['ref']] = $jsonObj;
+            }
+            $result['data'] = $sales;
+        } else if ($dbSales === false) {
+            $result['error'] = $salesMdl->errorInfo;
+        }
+
         return $result;
     }
 
@@ -150,7 +174,8 @@ class WposInvoices {
         if (isset($this->invoice->items) && sizeof($this->invoice->items)>0){
             $itemMdl = new SaleItemsModel();
             foreach ($this->invoice->items as $key => $item){
-                $itemid = $itemMdl->create($this->id, $item->sitemid, 0, $item->qty, $item->name, $item->desc, $item->taxid, $item->tax, $item->unit, $item->price);
+                $unit_original = (isset($item->unit_original) ? $item->unit_original : $item->unit);
+                $itemid = $itemMdl->create($this->id, $item->sitemid, 0, $item->qty, $item->name, $item->desc, $item->taxid, $item->tax, $item->cost, $item->unit, $item->price, $unit_original);
                 if ($itemid===false){
                     // Roll back transaction
                     $this->deleteInvoice();
@@ -314,14 +339,15 @@ class WposInvoices {
 
     public function addItem($result){
         // validate json
-        $jsonval = new JsonValidate($this->data, '{"id":1, "sitemid":1, "qty":1, "name":"", "desc":"~", "taxid":1, "tax":"{", "unit":1, "price":1}');
+        $jsonval = new JsonValidate($this->data, '{"id":1, "sitemid":1, "qty":1, "name":"", "desc":"~", "taxid":1, "tax":"{", "cost":1, "unit":1, "price":1}');
         if (($errors = $jsonval->validate())!==true){
             $result['error'] = $errors;
             return $result;
         }
         // insert item record
         $itemMdl = new SaleItemsModel();
-        if (($itemid = $itemMdl->create($this->data->id, $this->data->sitemid, 0, $this->data->qty, $this->data->name, $this->data->desc, $this->data->taxid, $this->data->tax, $this->data->unit, $this->data->price))===false){
+        $unit_original = (isset($this->data->unit_original) ? $this->data->unit_original : $this->data->unit);
+        if (($itemid = $itemMdl->create($this->data->id, $this->data->sitemid, 0, $this->data->qty, $this->data->name, $this->data->desc, $this->data->taxid, $this->data->tax, $this->data->cost, $this->data->unit, $this->data->price, $unit_original))===false){
             $result['error'] = "Could not insert item record: ".$itemMdl->errorInfo;
             return $result;
         }
@@ -352,14 +378,14 @@ class WposInvoices {
 
     public function updateItem($result){
         // validate json
-        $jsonval = new JsonValidate($this->data, '{"id":1, "itemid":1, "sitemid":1, "qty":1, "name":"", "desc":"~", "taxid":1, "tax":"{", "unit":1, "price":1}');
+        $jsonval = new JsonValidate($this->data, '{"id":1, "itemid":1, "sitemid":1, "qty":1, "name":"", "desc":"~", "taxid":1, "tax":"{", "cost":1, "unit":1, "price":1}');
         if (($errors = $jsonval->validate())!==true){
             $result['error'] = $errors;
             return $result;
         }
         // update item record
         $itemMdl = new SaleItemsModel();
-        if ($itemMdl->edit($this->data->itemid, $this->data->sitemid, 0, $this->data->qty, $this->data->name, $this->data->desc, $this->data->taxid, $this->data->tax, $this->data->unit, $this->data->price)===false){
+        if ($itemMdl->edit($this->data->itemid, $this->data->sitemid, 0, $this->data->qty, $this->data->name, $this->data->desc, $this->data->taxid, $this->data->tax, $this->data->cost, $this->data->unit, $this->data->price)===false){
             $result['error'] = "Could not update item record: ".$itemMdl->errorInfo;
             return $result;
         }
@@ -558,13 +584,16 @@ class WposInvoices {
 
     private function calculateInvoice(){
         $total = 0;
+        $cost = 0;
         $payments = 0;
         $this->invoice->taxdata = [];
         $this->invoice->tax = 0;
+        $this->invoice->numitems = 0;
         // add items
         if (isset($this->invoice->items)){
             foreach ($this->invoice->items as $key=>$item){
                 $item->price = round(floatval($item->qty)*floatval($item->unit), 2);
+                $this->invoice->numitems += $item->qty;
                 // add tax data to totals
                 foreach ($this->invoice->items[$key]->tax->values as $taxid=>$taxval){
                     if (isset($this->invoice->taxdata[$taxid])){
@@ -580,6 +609,7 @@ class WposInvoices {
                     $item->price+= $this->invoice->items[$key]->tax->total;
                 }
                 $total += $item->price;
+                $cost += round($item->cost * $item->qty, 2);
                 $this->invoice->items[$key]->unit = number_format($item->unit, 2, ".", "");
                 $this->invoice->items[$key]->price = number_format($item->price, 2, ".", "");
             }
@@ -591,6 +621,7 @@ class WposInvoices {
             }
         }
         // set total, payments & balance
+        $this->invoice->cost = number_format($cost, 2, ".", "");
         $this->invoice->total = number_format($total, 2, ".", "");
         $this->invoice->subtotal = number_format($total - $this->invoice->tax, 2, ".", "");
         // Get discount amount & apply to total & tax values
@@ -615,7 +646,7 @@ class WposInvoices {
     }
 
     private function saveInvoiceData(){
-        if ($this->invMdl->edit($this->id, null, json_encode($this->invoice), $this->invoice->status, $this->invoice->discount, $this->invoice->total, $this->invoice->balance)===false){
+        if ($this->invMdl->edit($this->id, null, json_encode($this->invoice), $this->invoice->status, $this->invoice->discount, $this->invoice->cost, $this->invoice->total, $this->invoice->balance)===false){
             return false;
         }
         return true;

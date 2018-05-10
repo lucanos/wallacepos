@@ -1,4 +1,6 @@
 <?php
+require $_SERVER['DOCUMENT_ROOT'].$_SERVER['APP_ROOT']."library/autoload.php";
+use Ifsnop\Mysqldump as IMysqldump;
 /**
  * WposAdminUtilities is part of Wallace Point of Sale system (WPOS) API
  *
@@ -230,24 +232,41 @@ class WposAdminUtilities {
     }
 
     /**
-     *  Backup database and init download.
+     * Get remote address using x-forwarded for if available
+     * @return string
      */
-    function backUpDatabase(){
-        include $_SERVER['DOCUMENT_ROOT'].$_SERVER['APP_ROOT']."library/mysql.export.class.php";
+    public static function getRemoteAddress(){
+        if (array_key_exists('HTTP_X_FORWARDED_FOR', $_SERVER)){
+            return  $_SERVER["HTTP_X_FORWARDED_FOR"];
+        }else if (array_key_exists('REMOTE_ADDR', $_SERVER)) {
+            return $_SERVER["REMOTE_ADDR"];
+        }else if (array_key_exists('HTTP_CLIENT_IP', $_SERVER)) {
+            return $_SERVER["HTTP_CLIENT_IP"];
+        }
+    }
+
+    /**
+     *  Backup database and init download.
+     * @param bool $download
+     * @throws Exception
+     */
+    public static function backUpDatabase($download=true){
         $conf = DbConfig::getConf();
-        $e = new export_mysql($conf['host'], $conf['user'], $conf['pass'], $conf['db']);
+        $dump = new IMysqldump\Mysqldump('mysql:host='.$conf['host'].';dbname='.$conf['db'], $conf['user'], $conf['pass']);
         $fname = $_SERVER['DOCUMENT_ROOT'].$_SERVER['APP_ROOT'].'docs/backup/dbbackup-'.date("Y-m-d_H-i-s").'.sql';
-        $e->exportValue($fname,false);
-        header('Content-Description: File Transfer');
-        header('Content-Type: application/octet-stream');
-        header('Content-Disposition: attachment; filename="'.basename($fname).'"'); //<<< Note the " " surrounding the file name
-        header('Content-Transfer-Encoding: binary');
-        header('Connection: Keep-Alive');
-        header('Expires: 0');
-        header('Cache-Control: must-revalidate, post-check=0, pre-check=0');
-        header('Pragma: public');
-        header('Content-Length: ' . filesize($fname));
-        echo(file_get_contents($fname));
+        $dump->start($fname);
+        if ($download) {
+            header('Content-Description: File Transfer');
+            header('Content-Type: application/octet-stream');
+            header('Content-Disposition: attachment; filename="' . basename($fname) . '"'); //<<< Note the " " surrounding the file name
+            header('Content-Transfer-Encoding: binary');
+            header('Connection: Keep-Alive');
+            header('Expires: 0');
+            header('Cache-Control: must-revalidate, post-check=0, pre-check=0');
+            header('Pragma: public');
+            header('Content-Length: ' . filesize($fname));
+            readfile($fname);
+        }
         // unlink($fname); TODO: Option to keep on server
         // log data
         Logger::write("Database backed up", "UTIL");

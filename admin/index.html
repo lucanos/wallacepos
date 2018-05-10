@@ -13,19 +13,19 @@
         <link rel="apple-touch-icon" sizes="114x114" href="/assets/images/apple-touch-icon-114x114.png">
 		<!-- basic styles -->
 
-		<link href="assets/css/bootstrap.min.css" rel="stylesheet" />
+		<link href="/assets/css/bootstrap.min.css" rel="stylesheet" />
 
-		<link rel="stylesheet" href="assets/css/font-awesome.min.css" />
+		<link rel="stylesheet" href="/assets/css/font-awesome.min.css" />
 
 		<!-- fonts -->
 
-		<link rel="stylesheet" href="assets/css/ace-fonts.css" />
+		<link rel="stylesheet" href="/assets/css/ace-fonts.css" />
 
 		<!-- ace styles -->
 
-		<link rel="stylesheet" href="assets/css/ace.min.css" />
-		<link rel="stylesheet" href="assets/css/ace-rtl.min.css" />
-		<link rel="stylesheet" href="assets/css/ace-skins.min.css" />
+		<link rel="stylesheet" href="/assets/css/ace.min.css" />
+		<!--<link rel="stylesheet" href="assets/css/ace-rtl.min.css" />
+		<link rel="stylesheet" href="assets/css/ace-skins.min.css" />-->
 
 		<!--[if lte IE 8]>
 		  <link rel="stylesheet" href="assets/css/ace-ie.min.css" />
@@ -46,10 +46,10 @@
 
         <!-- Styles used on most pages ->
         <!-- page specific plugin styles -->
-        <link rel="stylesheet" href="assets/css/jquery-ui-1.10.3.full.min.css" />
-
+        <link rel="stylesheet" href="/assets/css/jquery-ui-1.10.3.full.min.css" />
         <link rel="stylesheet" href="assets/css/bootstrap-datepicker.min.css" />
         <link rel="stylesheet" href="assets/js/select2/select2.css" />
+        <link rel="stylesheet" href="/assets/libs/datatables/datatables.min.css" />
 
         <link rel="stylesheet" href="assets/css/wposadmin.css" />
 	</head>
@@ -69,8 +69,8 @@
 						</small>
 					</a><!-- /.brand -->
 				</div><!-- /.navbar-header -->
-                <div style="position: absolute; right: 0;">
-                    <button class="btn" style="height: 45px;" onclick="WPOS.logout();">Logout</button>
+                <div style="position: absolute; right: 0; overflow:hidden;">
+                    <button class="btn logout_btn" onclick="WPOS.logout();">Logout</button>
                 </div>
 			</div><!-- /.container -->
 		</div>
@@ -159,7 +159,7 @@
                                 <li id="menustock" class="privmenuitem">
                                     <a  href="#!stock">
                                         <i class="icon-double-angle-right"></i>
-                                        Stock
+                                        Inventory
                                     </a>
                                 </li>
 
@@ -250,17 +250,17 @@
 							</a>
 
 							<ul class="submenu">
+                                <li>
+                                    <a href="#!info">
+                                        <i class="icon-double-angle-right"></i>
+                                        Info
+                                    </a>
+                                </li>
+
 								<li>
 									<a href="#!faq">
 										<i class="icon-double-angle-right"></i>
 										FAQ
-									</a>
-								</li>
-
-								<li>
-									<a href="#!contact">
-										<i class="icon-double-angle-right"></i>
-										Contact Us
 									</a>
 								</li>
 							</ul>
@@ -288,6 +288,7 @@
 								<a onclick="WPOS.goToHome();">Home</a>
 							</li>
 						</ul><!-- .breadcrumb -->
+                        <button class="btn btn-xs btn-primary pull-right" style="margin-top: 10px;" onclick="WPOS.stopSocket(); WPOS.loadPageContent(sec);"><i class="icon-refresh"></i> Refresh</button>
 					</div>
 
 					<div id="maincontent" class="page-content">
@@ -302,15 +303,19 @@
 				<i class="icon-double-angle-up icon-only bigger-110"></i>
 			</a>
 		</div><!-- /.main-container -->
-        <div id="modaldiv" class="login-layout" style="background-color:#000000; z-index: 3000;">
+        <div id="loginmodal" class="login-layout">
             <div id="loginbox" class="login-box widget-box visible no-border">
                 <div class="widget-main">
                     <h2 class="header blue lighter bigger">
                         <img style="height: 40px; margin-top: -5px;" src="/assets/images/apple-touch-icon-72x72.png">&nbsp;WallacePOS Admin
                     </h2>
-                    <div class="space-6"></div>
-                    <div class="space-6"></div>
-                    <div id="logindiv" style="display: none; height: 240px;">
+                    <div class="space-2"></div>
+                    <div id="login-banner" class="alert alert-block alert-success" style="display:none;">
+                        <i class="icon icon-lock green" style="margin-right: 3px;"></i>
+                        <span id="login-banner-txt"></span>
+                    </div>
+                    <div class="space-10"></div>
+                    <div id="logindiv" style="display: none;">
                         <label class="block clearfix">
                     <span class="block input-icon input-icon-right">
                         <input class="form-control" id="loguser" type="text" placeholder="Username"/>
@@ -320,7 +325,7 @@
                         <label class="block clearfix">
                     <span class="block input-icon input-icon-right">
                         <input class="form-control" id="logpass" onkeypress="if(event.keyCode == 13){WPOS.login();}" type="password"  placeholder="Password"/>
-                        <i class="icon-lock"></i>
+                        <i class="icon-lock" style="margin-right: 1px;"></i>
                     </span>
                         </label>
                         <div class="space-6"></div>
@@ -330,7 +335,7 @@
                         </button>
                         <div class="space-6"></div>
                     </div>
-                    <div id="loadingdiv" style="height: 225px;">
+                    <div id="loadingdiv">
                         <h3 id="loadingbartxt">Initializing</h3>
                         <div id="loadingprogdiv" class="progress progress-striped active">
                             <div class="progress-bar" id="loadingprog" style="width: 100%;"></div>
@@ -686,6 +691,8 @@
                 <div class="space-4"></div>
                 <label class="fixedlabel">Description: </label><textarea style="width: 178px;" id="transitemdesc"></textarea>
                 <div class="space-4"></div>
+                <label class="fixedlabel">Cost: </label><input type="text" id="transitemcost"/>
+                <div class="space-4"></div>
                 <label class="fixedlabel">Unit: </label><input type="text" id="transitemunit" onchange="WPOS.transactions.calculateItemTotals();"/>
                 <div class="space-4"></div>
                 <label class="fixedlabel">Tax: </label><select type="text" id="transitemtaxid" class="taxselect" onchange="WPOS.transactions.calculateItemTotals();"></select>
@@ -806,7 +813,7 @@
         <div id="translistdialog" class="hide">
             <table class="table table-responsive">
                 <thead>
-                <tr>
+                <tr id="translistheader">
                     <th>Ref</th>
                     <th>Details</th>
                 </tr>
@@ -833,7 +840,7 @@
         <script type="text/javascript">
             if('ontouchstart' in document.documentElement) document.write("<script src='assets/js/jquery.mobile.custom.min.js'>"+"<"+"/script>");
         </script>
-        <script src="assets/js/bootstrap.min.js"></script>
+        <script src="/assets/js/bootstrap.min.js"></script>
         <!--<script src="assets/js/typeahead"></script>!-->
 
         <!-- page specific plugin scripts -->
@@ -860,19 +867,21 @@
         <!-- Scripts included on many of the pages -->
         <script src="../assets/js/wpos/utilities.js"></script>
 
-        <script src="assets/js/jquery.dataTables.min.js"></script>
-        <script src="assets/js/datatableSorting.js"></script>
-        <script src="assets/js/jquery.dataTables.bootstrap.js"></script>
+        <script src="/assets/libs/datatables/datatables.min.js"></script>
+        <script src="/assets/libs/datatables/datatableSorting.js"></script>
 
         <script src="assets/js/date-time/bootstrap-datepicker.min.js"></script>
         <script src="assets/js/select2/select2.min.js"></script>
         <script src="assets/js/jquery.hotkeys.min.js"></script>
         <script src="assets/js/bootstrap-wysiwyg.min.js"></script>
         <script src="assets/js/bootbox.min.js"></script>
-        <!-- inline scripts related to this page -->
+
         <script src="assets/wpos/wpos.js"></script>
         <script src="assets/wpos/customers.js"></script>
         <script src="assets/wpos/transactions.js"></script>
+
+        <!-- Websocket library -->
+        <script type="text/javascript" src="/assets/libs/socketio/socket.io-1.4.5.js"></script>
 	</body>
 </html>
 

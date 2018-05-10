@@ -59,10 +59,11 @@ WallacePOS requires:
                      Order deny,allow
                      Allow from all
              </Proxy>
-             ProxyPass /socket.io/1/websocket/ ws://localhost:8080/socket.io/1/websocket/
-             ProxyPassReverse /socket.io/1/websocket/ ws://localhost:8080/socket.io/1/websocket
-             ProxyPass /socket.io/ http://localhost:8080/socket.io/
-             ProxyPassReverse /socket.io/ http://localhost:8080/socket.io/
+             RewriteEngine On
+             RewriteCond %{HTTP:Connection} Upgrade [NC]
+             RewriteRule /(.*) ws://localhost:8080/$1 [P,L]
+             ProxyPass        /socket.io http://localhost:8080/socket.io/
+             ProxyPassReverse /socket.io http://localhost:8080/socket.io/
              <Location /socket.io>
                      Order allow,deny
                      Allow from all
@@ -80,23 +81,25 @@ WallacePOS requires:
         sudo apt-get update
         sudo apt-get install nodejs && apt-get install npm
         cd %/your_install_dir%/api
-        sudo npm install socket.io@0.9.17
+        sudo npm install socket.io
     ```
 
 ## Installation & Startup
 
 1. Clone the latest WallacePOS release to %your_install_dir% if you haven't done so already.
    The installation dir must be your Apache document root directory!
+   
+2. Run `composer install` in your install directory to update PHP dependencies (you may need to install composer first).
 
-2. Visit /installer in your browser & follow the installation wizard.
+3. Visit /installer in your browser & follow the installation wizard.
 
-3. Login to the admin dashboard at /admin, from the menu go to Settings -> Utilities and make sure the feed server has been started successfully.
+4. Login to the admin dashboard at /admin, from the menu go to Settings -> Utilities and make sure the feed server has been started successfully.
 
 ## Deploying using dokku
 
 To deploy WallacePOS on dokku:
 
-1. Install [dokku-buildpack-multi](https://github.com/pauldub/dokku-multi-buildpack) on your dokku host.
+1. Install the [dokku-apt](https://github.com/F4-Group/dokku-apt) plugin on your dokku host.
 
 2. Fork the WallacePOS to a PRIVATE repo (IMPORTANT), edit /library/wpos/.dbconfig.json and fill in your own values.
 
@@ -106,6 +109,12 @@ To deploy WallacePOS on dokku:
 
 3. Commit deploy in the usual manner.
 
-4. Access /installer/?install from the web browser to install the database schema & templates
+4. Setup persistent storage by running:
 
-5. Login to the admin dashboard at /admin using credentials admin:admin & change the default passwords in Settings -> Staff & Admins!
+   `dokku storage:mount %APP_NAME% /var/lib/dokku/data/storage/%APP_NAME%:/app/docs`
+   
+   WARINING: Failure to do so will lead to data loss during subsequent upgrades.
+
+5. Access /installer/?install from the web browser to install the database schema & templates
+
+6. Login to the admin dashboard at /admin using credentials admin:admin & change the default passwords in Settings -> Staff & Admins!

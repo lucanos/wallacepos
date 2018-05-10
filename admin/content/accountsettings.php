@@ -149,7 +149,13 @@
         </tr>
         <tr>
             <td style="text-align: right;"><label>Type:&nbsp;</label></td>
-            <td><select style="width: 180px;" id="taxitemtype"><option value="standard">Standard</option></select></td>
+            <td>
+                <select style="width: 180px;" id="taxitemtype">
+                    <option value="standard">Standard</option>
+                    <option value="vat">VAT</option>
+                </select><br/>
+                <small>Item unit cost must be set for VAT calculation.</small>
+            </td>
         </tr>
         <tr>
             <td style="text-align: right;"><label>Value:&nbsp;</label></td>
@@ -237,7 +243,10 @@
 
         data['xeroenabled'] = $("#xeroenabled").is(":checked")?1:0;
         data['name'] = "accounting";
-        WPOS.sendJsonData("settings/set", JSON.stringify(data));
+        var result = WPOS.sendJsonData("settings/set", JSON.stringify(data));
+        if (result !== false){
+            WPOS.setConfigSet('accounting', result);
+        }
         // hide loader
         WPOS.util.hideLoader();
     }

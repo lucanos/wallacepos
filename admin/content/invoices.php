@@ -3,8 +3,13 @@
     <h1 style="display: inline-block;">
         Invoices
     </h1>
-    <button style="display: inline-block; vertical-align: top; float: right; pad" class="btn btn-success btn-sm" onclick="exportCurrentInvoices();"><i class="icon-cloud-download align-top bigger-125"></i>Export CSV</button>
-    <button style="display: inline-block; vertical-align: top; float: right;" class="btn btn-primary btn-sm" onclick="showInvoiceForm();"><i class="icon-plus-sign align-top bigger-125"></i>Add</button>
+    <button class="btn btn-primary btn-sm pull-right" onclick="showInvoiceForm();"><i class="icon-plus-sign align-top bigger-125"></i>Add</button>
+    <button class="btn btn-success btn-sm pull-right" style="margin-right: 8px;" onclick="exportCurrentInvoices();"><i class="icon-cloud-download align-top bigger-125"></i>Export CSV</button>
+    <div class="pull-right refsearchbox">
+        <label for="refsearch">Ref:</label>&nbsp;<input id="refsearch" type="text" style="height: 35px;" onkeypress="if(event.keyCode == 13){doSearch();}"/>
+        <button class="btn btn-primary btn-sm" style="vertical-align: top;" onclick="doSearch();"><i class="icon-search align-top bigger-125"></i>Search</button>
+        <button id="refsearch_clearbtn" class="btn btn-warning btn-sm" style="display: none; vertical-align: top;" onclick="reloadInvoiceData();"><i class="icon-remove align-top bigger-125"></i></button>
+    </div>
 </div><!-- /.page-header -->
 
 <div class="row">
@@ -22,16 +27,22 @@
                     <table id="invoicestable" class="table table-striped table-bordered table-hover table-responsive">
                         <thead>
                         <tr>
-                            <th>ID</th>
-                            <th>Ref</th>
-                            <th>Customer</th>
-                            <th>User</th>
-                            <th>Invoice Date</th>
-                            <th>Due Date</th>
-                            <th>Total</th>
-                            <th>Balance</th>
-                            <th>Status</th>
-                            <th></th>
+                            <th data-priority="0" class="center">
+                                <label>
+                                    <input type="checkbox" class="ace" />
+                                    <span class="lbl"></span>
+                                </label>
+                            </th>
+                            <th data-priority="1">ID</th>
+                            <th data-priority="8">Ref</th>
+                            <th data-priority="3">Customer</th>
+                            <th data-priority="9">User</th>
+                            <th data-priority="4">Invoice Date</th>
+                            <th data-priority="10">Due Date</th>
+                            <th data-priority="7">Total</th>
+                            <th data-priority="6">Balance</th>
+                            <th data-priority="5">Status</th>
+                            <th data-priority="2"></th>
                         </tr>
                         </thead>
 
@@ -59,8 +70,8 @@
 <!-- inline scripts related to this page -->
 <script type="text/javascript">
     var datatable;
-    var etime = new Date().getTime();
-    var stime = (etime - 2.62974e9); // a week ago
+    var etime = null; // start will no end time, so sales in different timezones show up.
+    var stime = (new Date().getTime() - 2.62974e9); // a week ago
     // ADD/EDIT DIALOG FUNCTIONS
     function showInvoiceForm(){
         $("#ninvprocessdt").datepicker('setDate', new Date());
@@ -85,6 +96,7 @@
     }
 
     function reloadInvoiceData(){
+        resetSearchBox();
         var result = WPOS.sendJsonData("invoices/get", JSON.stringify({"stime":stime, "etime":etime}));
         if (result!==false){
             WPOS.transactions.setTransactions(result);
@@ -98,9 +110,45 @@
         for (var key in invoices){
             itemarray.push(invoices[key]);
         }
-        datatable.fnClearTable();
-        datatable.fnAddData(itemarray);
+        datatable.fnClearTable(false);
+        if (itemarray.length>0)
+            datatable.fnAddData(itemarray, false);
+        datatable.api().draw(false);
     }
+
+
+    function doSearch(){
+        var ref = $("#refsearch").val();
+        if (ref==""){
+            alert("Please enter a full or partial transaction reference.");
+            return;
+        }
+        var data = {ref: ref};
+        WPOS.sendJsonDataAsync("invoices/search", JSON.stringify(data), function(sales){
+            var itemarray = [];
+            if (sales !== false){
+                WPOS.transactions.setTransactions(sales);
+                var tempitem;
+                for (var key in sales){
+                    tempitem = sales[key];
+                    tempitem.devlocname = (WPOS.devices.hasOwnProperty(tempitem.devid)?WPOS.devices[tempitem.devid].name:'NA')+" / "+(WPOS.locations.hasOwnProperty(tempitem.locid)?WPOS.locations[tempitem.locid].name:'NA');
+                    itemarray.push(tempitem);
+                }
+                datatable.fnClearTable(false);
+                console.log(itemarray);
+                if (itemarray.length>0)
+                    datatable.fnAddData(itemarray, false);
+                datatable.api().draw(false);
+                $("#refsearch_clearbtn").show();
+            }
+        });
+    }
+
+    function resetSearchBox(){
+        $("#refsearch_clearbtn").hide();
+        $("#refsearch").val('');
+    }
+
     // functions for processing json data
     function getStatusHtml(status){
         var stathtml;
@@ -144,49 +192,78 @@
 
     function exportCurrentInvoices(){
         var invoices = WPOS.transactions.getTransactions();
-        var csv = "ID, Reference, User, Device, Location, Customer Email, Items, #Items, Payments, Subtotal, Discount, Total, Invoice Time, Process Time, Status, Void Data, Refund Data\n"; // Set header
-        var invoice;
-        for (var i in invoices){
-            invoice = invoices[i];
-            // join items
-            var itemstr = "";
-            var itemqty = 0;
-            for (var i2 in invoice.items){
-                itemqty += parseInt(invoice.items[i2].qty);
-                itemstr += "("+invoice.items[i2].qty+"x "+invoice.items[i2].name+"-"+invoice.items[i2].desc+" @ "+WPOS.util.currencyFormat(invoice.items[i2].unit)+(invoice.items[i2].tax.inclusive?" tax incl. ":" tax excl. ")+WPOS.util.currencyFormat(invoice.items[i2].tax.total)+" = "+WPOS.util.currencyFormat(invoice.items[i2].price)+") \n";
+        var customers = WPOS.customers.getCustomers();
+
+        var data = {};
+        var refs = datatable.api().rows('.selected').data().map(function(row){ return row.ref }).join(',').split(',');
+
+        if (refs && refs.length > 0 && refs[0]!='') {
+            for (var i = 0; i < refs.length; i++) {
+                var ref = refs[i];
+                if (invoices.hasOwnProperty(ref))
+                    data[ref] = invoices[ref];
             }
-            // join payments
-            var paystr = "";
-            for (i2 in invoice.payments){
-                paystr += "("+invoice.payments[i2].method+"-"+WPOS.util.currencyFormat(invoice.payments[i2].amount)+") ";
-            }
-            var status = getTransactionStatus(invoices[i]);
-            var voidstr = "";
-            var refstr = "";
-            if (status !== 1){
-                // join void
-                if (invoice.hasOwnProperty("voiddata")){
-                    voidstr += WPOS.util.getDateFromTimestamp(invoice.voiddata.reason)+" - "+invoice.voiddata.reason;
-                }
-                // join refunds
-                if (invoice.hasOwnProperty("refunddata")){
-                    for (i2 in invoice.refunddata){
-                        var ritems = JSON.stringify(invoice.refunddata[i2].items);
-                        // TODO: get returned item string
-                        refstr += "(" + WPOS.util.getDateFromTimestamp(invoice.refunddata[i2].processdt) + " - "+invoice.refunddata[i2].reason+" - "+invoice.refunddata[i2].method+" - "+WPOS.util.currencyFormat(invoice.refunddata[i2].amount)+" - items: "+ritems+") ";
-                    }
-                }
-            }
-            switch (status){
-                case -2: status = "Overdue"; break;
-                case -1: status = "Open"; break;
-                case 1: status = "Closed"; break;
-                case 2: status = "Void"; break;
-                case 3: status = "Refunded"; break;
-            }
-            csv+=invoice.id+","+invoice.ref+","+WPOS.getConfigTable().users[invoice.userid].username+","+WPOS.getConfigTable().devices[invoice.devid].name+","+WPOS.getConfigTable().locations[invoice.locid].name+","
-                +invoice.custemail+","+itemstr+","+itemqty+","+paystr+","+WPOS.util.currencyFormat(invoice.subtotal)+","+invoice.discount+"%,"+WPOS.util.currencyFormat(invoice.total)+","+WPOS.util.getDateFromTimestamp(invoice.processdt)+","+invoice.dt+","+status+","+voidstr+","+refstr+"\n";
+        } else {
+            data = invoices;
         }
+
+        var csv = WPOS.data2CSV(
+            ['ID', 'Reference', 'User', 'Device', 'Location', 'Customer ID', 'Customer Email', 'Items', '# Items', 'Payments', 'Subtotal', 'Discount', 'Total', 'Balance', 'Invoice DT', 'Due DT', 'Created DT', 'Status', 'JSON Data'],
+            [
+                'id', 'ref',
+                {key:'userid', func: function(value){
+                    return WPOS.users.hasOwnProperty(value) ? WPOS.users[value].username : 'Unknown';
+                }},
+                {key:'devid', func: function(value){
+                    return WPOS.devices.hasOwnProperty(value) ? WPOS.devices[value].name : 'Unknown';
+                }},
+                {key:'locid', func: function(value){
+                    return WPOS.locations.hasOwnProperty(value) ? WPOS.locations[value].name : 'Unknown';
+                }},
+                'custid',
+                {key:'custid', func: function(value){
+                    return customers.hasOwnProperty(value) ? customers[value].email : '';
+                }},
+                {key:'items', func: function(value){
+                    var itemstr = '';
+                    for (var i in value){
+                        itemstr += value[i].qty+"x "+value[i].name+"-"+value[i].desc+" @ "+WPOS.util.currencyFormat(value[i].unit)+(value[i].tax.inclusive?" tax incl. ":" tax excl. ")+WPOS.util.currencyFormat(value[i].tax.total)+" = "+WPOS.util.currencyFormat(value[i].price)+" \n";
+                    }
+                    return itemstr;
+                }},
+                'numitems',
+                {key:'payments', func: function(value){
+                    var paystr = '';
+                    for (var i in value){
+                        paystr += value[i].method+" "+WPOS.util.currencyFormat(value[i].amount)+" ";
+                    }
+                    return paystr;
+                }},
+                'subtotal', 'discount', 'total', 'balance',
+                {key:'processdt', func: function(value){
+                    return WPOS.util.getDateFromTimestamp(value, 'Y-m-d');
+                }},
+                {key:'duedt', func: function(value){
+                    return WPOS.util.getDateFromTimestamp(value, 'Y-m-d');
+                }},
+                'dt',
+                {key:'status', func: function(value){
+                    var status;
+                    switch (value){
+                        case -2: status = "Overdue"; break;
+                        case -1: status = "Open"; break;
+                        case 1: status = "Closed"; break;
+                        case 2: status = "Void"; break;
+                        case 3: status = "Refunded"; break;
+                    }
+                    return status;
+                }},
+                {key:'id', func: function(value, record){
+                    return record;
+                }}
+            ],
+            data
+        );
 
         WPOS.initSave("invoices-"+WPOS.util.getDateFromTimestamp(stime)+"-"+WPOS.util.getDateFromTimestamp(etime), csv);
     }
@@ -211,25 +288,71 @@
         for (var key in invoices){
             itemarray.push(invoices[key]);
         }
-        var timestamphtml = '<small class="hidden timestamp">';
-        datatable = $('#invoicestable').dataTable(
-            { "bProcessing": true,
-                "aaData": itemarray,
-                "aaSorting": [[8, "desc"],[ 0, "desc" ]],
-                "aoColumns": [
-                    { "sType": "numeric", "mData":"id" },
-                    { "sType": "string", "mData":function(data, type, val){ return '<a class="reflabel" title="'+data.ref+'" href="">'+data.ref.split("-")[2]+'</a>'; } },
-                    { "sType": "string", "mData":function(data, type, val){ return (customers.hasOwnProperty(data.custid)?customers[data.custid].name:"N/A");} },
-                    { "sType": "string", "mData":function(data, type, val){ return WPOS.getConfigTable().users[data.userid].username;} },
-                    { "sType": "timestamp", "mData":function(data, type, val){return timestamphtml+data.processdt+'</small>'+WPOS.util.getShortDate(data.processdt);} },
-                    { "sType": "timestamp", "mData":function(data, type, val){return timestamphtml+data.duedt+'</small>'+WPOS.util.getShortDate(data.duedt);} },
-                    { "sType": "currency", "mData":function(data,type,val){return WPOS.util.currencyFormat(data["total"]);} },
-                    { "sType": "currency", "mData":function(data,type,val){return WPOS.util.currencyFormat(data["balance"]);} },
-                    { "sType": "html", "mData":function(data,type,val){return getStatusHtml(getTransactionStatus(data));} },
-                    { "sType": "html", mData:null, sDefaultContent:'<div class="action-buttons"><a class="green" onclick="WPOS.transactions.openTransactionDialog($(this).closest(\'tr\').find(\'.reflabel\').attr(\'title\'));"><i class="icon-pencil bigger-130"></i></a><a class="red" onclick="WPOS.transactions.deleteTransaction($(this).closest(\'tr\').find(\'.reflabel\').attr(\'title\'))"><i class="icon-trash bigger-130"></i></a></div>', "bSortable": false }
-                ] } );
-        // insert table wrapper
-        $(".dataTables_wrapper table").wrap("<div class='table_wrapper'></div>");
+        datatable = $('#invoicestable').dataTable({
+            "bProcessing": true,
+            "aaData": itemarray,
+            "aaSorting": [[8, "desc"],[ 1, "desc" ]],
+            "aoColumns": [
+                { mData:null, sDefaultContent:'<div style="text-align: center"><label><input class="ace dt-select-cb" type="checkbox"><span class="lbl"></span></label><div>', bSortable: false },
+                { "sType": "numeric", "mData":"id" },
+                { "sType": "string", "mData":function(data, type, val){ return '<a class="reflabel" title="'+data.ref+'" href="">'+data.ref.split("-")[2]+'</a>'; } },
+                { "sType": "string", "mData":function(data, type, val){ return (customers.hasOwnProperty(data.custid)?customers[data.custid].name:"N/A");} },
+                { "sType": "string", "mData":function(data, type, val){ var users = WPOS.getConfigTable().users; if (users.hasOwnProperty(data.userid)){ return users[data.userid].username; } return 'N/A'; } },
+                { "sType": "timestamp", "mData":function(data, type, val){return datatableTimestampRender(type, data.processdt, WPOS.util.getShortDate);} },
+                { "sType": "timestamp", "mData":function(data, type, val){return datatableTimestampRender(type, data.duedt, WPOS.util.getShortDate);} },
+                { "sType": "currency", "mData":function(data,type,val){return WPOS.util.currencyFormat(data["total"]);} },
+                { "sType": "currency", "mData":function(data,type,val){return WPOS.util.currencyFormat(data["balance"]);} },
+                { "sType": "html", "mData":function(data,type,val){return getStatusHtml(getTransactionStatus(data));} },
+                { "sType": "html", mData:null, sDefaultContent:'<div class="action-buttons"><a class="green" onclick="WPOS.transactions.openTransactionDialog($(this).closest(\'tr\').find(\'.reflabel\').attr(\'title\'));"><i class="icon-pencil bigger-130"></i></a><a class="red" onclick="WPOS.transactions.deleteTransaction($(this).closest(\'tr\').find(\'.reflabel\').attr(\'title\'))"><i class="icon-trash bigger-130"></i></a></div>', "bSortable": false }
+            ],
+            "columns": [
+                {},
+                {type: "numeric"},
+                {type: "string"},
+                {type: "string"},
+                {type: "string"},
+                {type: "timestamp"},
+                {type: "timestamp"},
+                {type: "currency"},
+                {type: "currency"},
+                {type: "html"},
+                {}
+            ],
+            "fnInfoCallback": function( oSettings, iStart, iEnd, iMax, iTotal, sPre ) {
+                // Add selected row count to footer
+                var selected = this.api().rows('.selected').count();
+                return sPre+(selected>0 ? '<br/>'+selected+' row(s) selected':'');
+            }
+        });
+
+        // row selection checkboxes
+        datatable.find("tbody").on('click', '.dt-select-cb', function(e){
+            var row = $(this).parents().eq(3);
+            if (row.hasClass('selected')) {
+                row.removeClass('selected');
+            } else {
+                row.addClass('selected');
+            }
+            datatable.api().draw(false);
+            e.stopPropagation();
+        });
+
+        $('table.dataTable th input:checkbox').on('change' , function(){
+            var that = this;
+            $(this).closest('table.dataTable').find('tr > td:first-child input:checkbox')
+                .each(function(){
+                    var row = $(this).parents().eq(3);
+                    if ($(that).is(":checked")) {
+                        row.addClass('selected');
+                        $(this).prop('checked', true);
+                    } else {
+                        row.removeClass('selected');
+                        $(this).prop('checked', false);
+                    }
+                });
+            datatable.api().draw(false);
+        });
+
         // add controls
         $("#invoicestable_length").append('&nbsp;&nbsp;<div style="display: inline-block;"><label>Range: <input type="text" id="invstime" onclick="$(this).blur();" /></label> <label>to <input type="text" id="invetime" onclick="$(this).blur();" /></label></div>');
 
@@ -267,7 +390,8 @@
         // Invoice range datepickers
         var invstime = $("#invstime");
         var invetime = $("#invetime");
-        invstime.datepicker({dateFormat:"dd/mm/yy", maxDate: new Date(etime),
+        var maxdate = new Date().getTime();
+        invstime.datepicker({dateFormat:"dd/mm/yy", maxDate: new Date(maxdate),
             onSelect: function(text, inst){
                 var date = $("#invstime").datepicker("getDate");
                 date.setHours(0); date.setMinutes(0); date.setSeconds(0);
@@ -284,7 +408,6 @@
             }
         });
         invstime.datepicker('setDate', new Date(stime));
-        invetime.datepicker('setDate', new Date(etime));
 
         // Add invoice datepickers
         $("#ninvprocessdt").datepicker({dateFormat:"dd/mm/yy"});

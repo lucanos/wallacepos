@@ -26,7 +26,8 @@ $_SERVER['APP_ROOT'] = "/";
 
 require($_SERVER['DOCUMENT_ROOT'] . $_SERVER['APP_ROOT'] . 'library/wpos/config.php');
 // setup api error handling
-set_error_handler("errorHandler", E_ERROR | E_WARNING | E_PARSE);
+set_error_handler("errorHandler", E_ERROR | E_PARSE);
+set_error_handler("warningHandler", E_WARNING);
 set_exception_handler("exceptionHandler");
 
 require($_SERVER['DOCUMENT_ROOT'] . $_SERVER['APP_ROOT'] . 'library/wpos/AutoLoader.php'); //Autoload all the classes.
@@ -109,6 +110,7 @@ if ($_REQUEST['a']!=="multi"){
         $result['error'] = "No API request data provided";
         returnResult($result);
     }
+    $result['data']=array();
     // loop through each request, stop & return the first error if encountered
     foreach ($requests as $action=>$data){
         if ($data==null) {
@@ -139,6 +141,9 @@ function routeApiCall($action, $data, $result) {
     $notinprev = false;
     // Check for action in unprotected area (does not require permission)
     switch ($action) {
+        case "auth/websocket":
+            $result['data'] = $auth->authoriseWebsocket();
+            break;
         // POS Specific
         case "config/get":
             $setup = new WposPosSetup($data);
@@ -254,6 +259,17 @@ function routeApiCall($action, $data, $result) {
             $adminMdl = new WposAdminItems($data);
             $result = $adminMdl->deleteStoredItem($result);
             break;
+
+        case "items/import/set":
+            $adminMdl = new WposAdminItems($data);
+            $result = $adminMdl->importItemsSet($result);
+            break;
+
+        case "items/import/start":
+            $adminMdl = new WposAdminItems($data);
+            $result = $adminMdl->importItemsStart($result);
+            break;
+
         // suppliers
         case "suppliers/get":
             $jsondata = new WposPosData();
@@ -455,6 +471,13 @@ function routeApiCall($action, $data, $result) {
         case "invoices/get":
             $invMdl = new WposInvoices($data);
             $result = $invMdl->getInvoices($result);
+            break;
+
+        case "invoices/search":
+            $invMdl = new WposInvoices();
+            if (isset($data)) {
+                $result = $invMdl->searchInvoices($data, $result);
+            }
             break;
 
         case "invoices/add":
@@ -689,7 +712,7 @@ function routeApiCall($action, $data, $result) {
         case "message/send":
             $socket = new WposSocketIO();
             if ($data->device === null) {
-                if (($error = $socket->sendBroadcastMessage($data->message)) !== true) {
+                if (($error = $socket->sendMessageToDevices(null, $data->message)) !== true) {
                     $result['error'] = $error;
                 }
             } else {
@@ -750,7 +773,7 @@ function routeApiCall($action, $data, $result) {
             $result = $tempMdl->editTemplate($result);
             break;
         case "templates/restore":
-            WposTemplates::restoreDefaults();
+            WposTemplates::restoreDefaults((isset($data->filename)?$data->filename:null));
             break;
 
         default:
@@ -771,39 +794,6 @@ function returnResult($result){
         echo($resstr);
     }
     die();
-}
-/**
- * Php error handler, sets & returns json result object
- * @param $errorno
- * @param $errstr
- * @param $errfile
- * @param $errline
- */
-function errorHandler($errorno, $errstr, $errfile, $errline){
-    global $result;
-
-    $result['errorCode'] = "phperr";
-
-    if ($result['error'] == "OK") $result['error'] = "";
-
-    $result['error'] .= $errorno . ": " . $errstr . " " . $errfile . " on line " . $errline . "\n";
-
-    die(json_encode($result));
-}
-/**
- * Php exception handler, sets & returns json result object
- * @param Exception $ex
- */
-function exceptionHandler(Throwable $ex){
-    global $result;
-
-    $result['errorCode'] = "phpexc";
-
-    if ($result['error'] == "OK") $result['error'] = "";
-
-    $result['error'] .= $ex->getMessage() . "\nFile: " . $ex->getFile() . " line " . $ex->getLine();
-
-    die(json_encode($result));
 }
 
 ?>

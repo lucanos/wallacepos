@@ -15,6 +15,15 @@
             <div class="widget-header widget-header-flat">
 
                 <div class="widget-toolbar no-border">
+                    <label for="graphinterval">Interval:</label>
+                    <select id="graphinterval" onchange="setGraphInterval();" style="margin-right: 5px;">
+                        <option value="86400000" selected="selected">Day</option>
+                        <option value="604800000">Week</option>
+                        <option value="1209600000">Fortnight</option>
+                        <option value="2629743833">Month</option>
+                        <option value="7889231500">3 Months</option>
+                        <option value="31556926000">Year</option>
+                    </select>
                     <label>Range: <input type="text" style="width: 85px;" id="graphstime" onclick="$(this).blur();" /></label>
                     <label>to <input type="text" style="width: 85px;" id="graphetime" onclick="$(this).blur();" /></label>
                 </div>
@@ -74,8 +83,22 @@
                     </div>
                 </li>
                 <li class="dd-item">
-                    <div class="dd2-content">Total Takings
+                    <div class="dd2-content">Revenue
                         <button style="float: right; margin-top: -3px;" onclick="removeUIData('takings', $(this));"
+                                class="btn btn-xs btn-danger">Remove
+                        </button>
+                    </div>
+                </li>
+                <li class="dd-item">
+                    <div class="dd2-content">Cost
+                        <button style="float: right; margin-top: -3px;" onclick="removeUIData('cost', $(this));"
+                                class="btn btn-xs btn-danger">Remove
+                        </button>
+                    </div>
+                </li>
+                <li class="dd-item">
+                    <div class="dd2-content">Profit
+                        <button style="float: right; margin-top: -3px;" onclick="removeUIData('profit', $(this));"
                                 class="btn btn-xs btn-danger">Remove
                         </button>
                     </div>
@@ -92,7 +115,7 @@
     var dataobj;
     // Graph functions
     function loadDefaultData() {
-        var sales = [], refunds = [], takings = [], salerefs = [], refundrefs = [], takingrefs = [];
+        var sales = [], refunds = [], takings = [], cost = [], profit = [], salerefs = [], refundrefs = [], takingrefs = [];
         // get range
         var jdata = getData('graph/general');
         var tempdate;
@@ -110,14 +133,16 @@
             refunds.push([ tempdate, jdata[i].refundtotal]);
             takingrefs.push(jdata[i].refs);
             takings.push([ tempdate, jdata[i].totaltakings]);
+            cost.push([ tempdate, jdata[i].cost]);
+            profit.push([ tempdate, jdata[i].profit]);
         }
-        dataobj = {"sales": { label: "Sales", refs: salerefs, data: sales, color: "#9ABC32" }, "refunds": { label: "Refunds", refs: refundrefs, data: refunds, color: "#EDC240" }, "takings": { label: "Takings", refs: takingrefs, data: takings, color: "#3983C2" }};
+        dataobj = {profit:{ label: "Profit", refs: takingrefs, data: profit, color: "#29AB87" }, cost:{ label: "Cost", refs: takingrefs, data: cost, color: "#EA3C53" }, "sales": { label: "Sales", refs: salerefs, data: sales, color: "#9ABC32" }, "refunds": { label: "Refunds", refs: refundrefs, data: refunds, color: "#EDC240" }, "takings": { label: "Takings", refs: takingrefs, data: takings, color: "#3983C2" }};
         drawChart();
     }
 
     function getData(action){
         // fetch the data
-        return WPOS.sendJsonData(action, JSON.stringify({"stime": stime, "etime": etime, "interval": 86400000}));
+        return WPOS.sendJsonData(action, JSON.stringify({"stime": stime, "etime": etime, "interval": $("#graphinterval").val()}));
     }
 
     function userLoadDataSet(){
@@ -183,6 +208,19 @@
         drawChart();
     }
 
+    function setGraphInterval(){
+        var interval = $("#graphinterval").val();
+        // we want at least 4 plots on the graph and no more than 10 when changing the graph
+        var timediff = etime - stime;
+        if ((timediff < (interval * 4)) || (timediff > interval * 10)){
+            stime = etime - interval * (interval==86400000 ? 7 : 4)+1;
+            var sdate = new Date(stime);
+            //sdate.setHours(0); sdate.setMinutes(0); sdate.setSeconds(0);
+            $("#graphstime").datepicker('setDate', sdate);
+        }
+        setGraphRange();
+    }
+
     function setGraphRange() {
         // show loader
         WPOS.util.showLoader();
@@ -190,9 +228,11 @@
         // clear data set list and readd the default for now
         // TODO: Reinitilize/reload the current datasets when changing range
         $("#datasets").html('');
-        addUIRow('sales', "Sales");
-        addUIRow('refunds', "Refunds");
-        addUIRow('takings', "Takings");
+        addUIRow('sales', "Sales Total");
+        addUIRow('refunds', "Refunds Total");
+        addUIRow('takings', "Revenue");
+        addUIRow('cost', "Cost");
+        addUIRow('profit', "Profit");
         // hide loader
         WPOS.util.hideLoader();
     }

@@ -55,20 +55,24 @@ class SaleItemsModel extends DbConfig
      *
      * @return bool|string Returns false on an unexpected failure, returns -1 if a unique constraint in the database fails, or the new rows id if the insert is successful
      */
-    public function create($saleid, $sitemid, $saleitemid, $qty, $name, $desc, $taxid, $tax, $unit, $price)
+    public function create($saleid, $sitemid, $saleitemid, $qty, $name, $desc, $taxid, $tax, $cost, $unit, $price, $unit_original=0)
     {
-        $sql = "INSERT INTO sale_items (saleid, storeditemid, saleitemid, qty, name, description, taxid, tax, unit, price, refundqty) VALUES (:saleid, :sitemid, :saleitemid, :qty, :name, :description, :taxid, :tax, :unit, :price, 0)";
+        $sql = "INSERT INTO sale_items (saleid, storeditemid, saleitemid, qty, name, description, taxid, tax, tax_incl, tax_total, cost, unit_original, unit, price, refundqty) VALUES (:saleid, :sitemid, :saleitemid, :qty, :name, :description, :taxid, :tax, :tax_incl, :tax_total, :cost, :unit_original, :unit, :price, 0)";
         $placeholders = [
-            ':saleid'        => $saleid,
-            ':sitemid'       => $sitemid,
+            ':saleid'       => $saleid,
+            ':sitemid'      => $sitemid,
             ':saleitemid'   => $saleitemid,
-            ':qty'     => $qty,
-            ':name'     => $name,
-            ':description'   => $desc,
-            ':taxid' => $taxid,
-            ':tax' => json_encode($tax),
-            ':unit'     => $unit,
-            ':price'   => $price
+            ':qty'          => $qty,
+            ':name'         => $name,
+            ':description'  => $desc,
+            ':taxid'        => $taxid,
+            ':tax'          => json_encode($tax),
+            ':tax_incl'     => $tax->inclusive ? 1 : 0,
+            ':tax_total'    => $tax->total,
+            ':cost'         => $cost,
+            ':unit_original'=> $unit_original,
+            ':unit'         => $unit,
+            ':price'        => $price
         ];
 
         return $this->insert($sql, $placeholders);
@@ -89,9 +93,9 @@ class SaleItemsModel extends DbConfig
      *
      * @return bool|string Returns false on an unexpected failure, returns -1 if a unique constraint in the database fails, or the new rows id if the insert is successful
      */
-    public function import($id, $saleid, $sitemid, $saleitemid, $qty, $name, $desc, $taxid, $tax, $unit, $price)
+    public function import($id, $saleid, $sitemid, $saleitemid, $qty, $name, $desc, $taxid, $tax, $cost, $unit, $price)
     {
-        $sql = "INSERT INTO sale_items (id, saleid, storeditemid, saleitemid, qty, name, description, taxid, tax, unit, price, refundqty) VALUES (:id, :saleid, :sitemid, :saleitemid, :qty, :name, :description, :taxid, :tax, :unit, :price, 0)";
+        $sql = "INSERT INTO sale_items (id, saleid, storeditemid, saleitemid, qty, name, description, taxid, tax, cost, unit, price, refundqty) VALUES (:id, :saleid, :sitemid, :saleitemid, :qty, :name, :description, :taxid, :tax, :cost, :unit, :price, 0)";
         $placeholders = [
             ':id'        => $id,
             ':saleid'        => $saleid,
@@ -101,6 +105,7 @@ class SaleItemsModel extends DbConfig
             ':name'     => $name,
             ':description'   => $desc,
             ':taxid' => $taxid,
+            ':cost' => $cost,
             ':tax' => $tax,
             ':unit'     => $unit,
             ':price'   => $price
@@ -165,9 +170,9 @@ class SaleItemsModel extends DbConfig
      * @param $price
      * @return array|bool Returns false on an unexpected failure or the rows found by the statement. Returns an empty array when nothing is found
      */
-    public function edit($itemid, $sitemid, $saleitemid=0, $qty, $name, $desc, $taxid, $tax, $unit, $price){
-        $sql = 'UPDATE sale_items SET storeditemid=:sitemid, saleitemid=:saleitemid, qty=:qty, name=:name, description=:desc, taxid=:taxid, tax=:tax, unit=:unit, price=:price WHERE id= :id';
-        $placeholders = [":id"=>$itemid, ":sitemid"=>$sitemid, ":saleitemid"=>$saleitemid, ":qty"=>$qty, ":name"=>$name, ":desc"=>$desc, ":taxid"=>$taxid, ":tax"=>json_encode($tax), ":unit"=>$unit, ":price"=>$price];
+    public function edit($itemid, $sitemid, $saleitemid=0, $qty, $name, $desc, $taxid, $tax, $cost, $unit, $price){
+        $sql = 'UPDATE sale_items SET storeditemid=:sitemid, saleitemid=:saleitemid, qty=:qty, name=:name, description=:desc, taxid=:taxid, tax=:tax, cost=:cost, unit=:unit, price=:price WHERE id= :id';
+        $placeholders = [":id"=>$itemid, ":sitemid"=>$sitemid, ":saleitemid"=>$saleitemid, ":qty"=>$qty, ":name"=>$name, ":desc"=>$desc, ":taxid"=>$taxid, ":tax"=>json_encode($tax), ":cost"=>$cost, ":unit"=>$unit, ":price"=>$price];
 
         return $this->update($sql, $placeholders);
     }
@@ -190,7 +195,7 @@ class SaleItemsModel extends DbConfig
             $grouptable = "stored_categories";
         }
 
-        $sql = "SELECT ".($group>0?'si.'.$groupcol.' AS groupid, p.name AS name':'i.storeditemid AS groupid, i.name AS name').", COALESCE(SUM(i.qty), 0) AS itemnum, COALESCE(SUM(i.price-(i.price*(s.discount/100))), 0) AS itemtotal, COALESCE(SUM(i.refundqty), 0) AS refnum, COALESCE(SUM(i.unit*i.refundqty), 0) AS reftotal, COALESCE(GROUP_CONCAT(s.ref SEPARATOR ','),'') as refs";
+        $sql = "SELECT ".($group>0?'si.'.$groupcol.' AS groupid, p.name AS name':'i.storeditemid AS groupid, i.name AS name').", COALESCE(SUM(i.qty), 0) AS itemnum, COALESCE(SUM(i.price-(i.price*(s.discount/100))), 0) AS itemtotal, COALESCE(SUM((i.price*(s.discount/100))), 0) AS discounttotal, COALESCE(SUM(i.tax_total-(i.tax_total*(s.discount/100))), 0) AS taxtotal, COALESCE(SUM(i.refundqty), 0) AS refnum, COALESCE(SUM(i.unit*i.refundqty), 0) AS reftotal, COALESCE(GROUP_CONCAT(DISTINCT s.ref SEPARATOR ','),'') as refs";
         $sql.= ' FROM sale_items AS i LEFT JOIN sales AS s ON i.saleid=s.id'.($group>0 ? ' LEFT JOIN stored_items AS si ON i.storeditemid=si.id LEFT JOIN '.$grouptable.' AS p ON si.'.$groupcol.'=p.id' : '').' WHERE (s.processdt>= :stime AND s.processdt<= :etime) '.($novoids?'AND s.status!=3':'');
         $placeholders = [":stime"=>$stime, ":etime"=>$etime];
 

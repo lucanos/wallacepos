@@ -47,7 +47,7 @@ class WposAdminItems {
     public function addStoredItem($result)
     {
         // validate input
-        $jsonval = new JsonValidate($this->data, '{"code":"","qty":1, "name":"", "taxid":1, "price":-1,"type":""}');
+        $jsonval = new JsonValidate($this->data, '{"code":"","qty":1, "name":"", "taxid":1, "cost":-1, "price":-1,"type":""}');
         if (($errors = $jsonval->validate()) !== true) {
             $result['error'] = $errors;
             return $result;
@@ -84,7 +84,7 @@ class WposAdminItems {
     public function updateStoredItem($result)
     {
         // validate input
-        $jsonval = new JsonValidate($this->data, '{"id":1, "code":"", "qty":1, "name":"", "taxid":1, "price":-1}');
+        $jsonval = new JsonValidate($this->data, '{"id":1, "code":"", "qty":1, "name":"", "taxid":1, "cost":-1, "price":-1}');
         if (($errors = $jsonval->validate()) !== true) {
             $result['error'] = $errors;
             return $result;
@@ -103,7 +103,7 @@ class WposAdminItems {
         // update the item
         $qresult = $itemMdl->edit($this->data->id, $this->data);
         if ($qresult === false) {
-            $result['error'] = "Could not edit the item";
+            $result['error'] = "Could not edit the item: ".$itemMdl->errorInfo;
         } else {
             $result['data'] = $this->data;
             // broadcast the item
@@ -125,14 +125,24 @@ class WposAdminItems {
     {
         // validate input
         if (!is_numeric($this->data->id)) {
-            $result['error'] = "A valid id must be supplied";
-            return $result;
+            if (isset($this->data->id)) {
+                $ids = explode(",", $this->data->id);
+                foreach ($ids as $id){
+                    if (!is_numeric($id)){
+                        $result['error'] = "A valid comma separated list of ids must be supplied";
+                        return $result;
+                    }
+                }
+            } else {
+                $result['error'] = "A valid id, or comma separated list of ids must be supplied";
+                return $result;
+            }
         }
         // remove the item
         $itemMdl = new StoredItemsModel();
-        $qresult = $itemMdl->remove($this->data->id);
+        $qresult = $itemMdl->remove(isset($ids)?$ids:$this->data->id);
         if ($qresult === false) {
-            $result['error'] = "Could not delete the item";
+            $result['error'] = "Could not delete the item: ".$itemMdl->errorInfo;
         } else {
             $result['data'] = true;
             // broadcast the item; supplying the id only indicates deletion
@@ -140,10 +150,186 @@ class WposAdminItems {
             $socket->sendItemUpdate($this->data->id);
 
             // log data
-            Logger::write("Item deleted with id:" . $this->data->id, "ITEM");
+            Logger::write("Item(s) deleted with id:" . $this->data->id, "ITEM");
         }
         return $result;
     }
+
+    /**
+     * Import items
+     * @param $result
+     * @return mixed
+     */
+    public function importItemsSet($result)
+    {
+        $_SESSION['import_data'] = $this->data->import_data;
+        $_SESSION['import_options'] = $this->data->options;
+        return $result;
+    }
+
+    private function getIdForName($arr, $value){
+        foreach($arr as $key => $item) {
+            if ($item['name'] === $value)
+                return $item['id'];
+        }
+        return false;
+    }
+
+    /**
+     * Import items
+     * @param $result
+     * @return mixed
+     */
+    public function importItemsStart($result)
+    {
+        if (!isset($_SESSION['import_data']) || !is_array($_SESSION['import_data'])){
+            $result['error'] = "Import data was not received.";
+            EventStream::sendStreamData($result);
+            return $result;
+        }
+        $options = $_SESSION['import_options'];
+        $items = $_SESSION['import_data'];
+
+        EventStream::iniStream();
+        $itemMdl = new StoredItemsModel();
+        $catMdl = new CategoriesModel();
+        $supMdl = new SuppliersModel();
+        $taxMdl = new TaxRulesModel();
+
+        $categories = $catMdl->get();
+        $suppliers = $supMdl->get();
+        $taxRules = $taxMdl->get();
+        foreach ($taxRules as $key=>$rule){
+            $data = json_decode($rule['data'], true);
+            $data['id'] = $rule['id'];
+            $taxRules[$rule['id']] = $data;
+        }
+
+        if ($categories===false || $suppliers===false || $taxRules===false){
+            $result['error'] = "Could not load categories, suppliers or tax rules: ".$catMdl->errorInfo." ".$supMdl->errorInfo." ".$taxMdl->errorInfo;
+            EventStream::sendStreamData($result);
+            return $result;
+        }
+
+        EventStream::sendStreamData(['status'=>"Validating Items..."]);
+        $validator = new JsonValidate(null, '{"code":"", "qty":1, "name":"", "price":-1, "tax_name":"", "category_name":"", "supplier_name":""}');
+        $count = 1;
+        foreach ($items as $key=>$item){
+            EventStream::sendStreamData(['status'=>"Validating Items...", 'progress'=>$count]);
+
+            $validator->validate($item);
+
+            $item->code = strtoupper($item->code); // make sure stockcode is upper case
+            $dupitems = $itemMdl->get(null, $item->code);
+            if (sizeof($dupitems) > 0) {
+                $dupitem = $dupitems[0];
+                if ($dupitem['id'] != $item->id) {
+                    $result['error'] = "An item with the stockcode ".$item->code." already exists on line ".$count;
+                    EventStream::sendStreamData($result);
+                    return $result;
+                }
+            }
+
+            // remove currency symbol from price & cost
+            $item->price = preg_replace("/([^0-9\\.])/i", "", $item->price);
+            $item->cost = preg_replace("/([^0-9\\.])/i", "", $item->cost);
+
+            // Match tax id with name
+            if (!$item->tax_name){
+                $id = 1;
+            } else {
+                $id = $this->getIdForName($taxRules, $item->tax_name);
+            }
+            if ($id===false){
+                $result['error'] = "Could not find tax rule id for name ".$item->tax_name." on line ".$count." of the CSV";
+                EventStream::sendStreamData($result);
+                return $result;
+            }
+            $item->taxid = $id;
+            unset($item->tax_name);
+
+            // Match category
+            if (!$item->category_name || $item->category_name=="None" || $item->category_name=="Misc"){
+                $id = 0;
+            } else {
+                $id = $this->getIdForName($categories, $item->category_name);
+            }
+            if ($id===false){
+                if ((isset($options->add_categories) && $options->add_categories===true)){
+                    EventStream::sendStreamData(['status'=>"Adding category..."]);
+                    $id = $catMdl->create($item->category_name);
+                    if (!is_numeric($id)){
+                        $result['error'] = "Could not add new category " . $item->category_name . " on line ".$count." of the CSV: ".$catMdl->errorInfo;
+                        EventStream::sendStreamData($result);
+                        return $result;
+                    }
+                    $categories[] = [''=>$id, 'name'=>$item->category_name];
+                } else {
+                    $result['error'] = "Could not find category id for name " . $item->category_name . " on line ".$count." of the CSV";
+                    EventStream::sendStreamData($result);
+                    return $result;
+                }
+            }
+            $item->categoryid = $id;
+            unset($item->category_name);
+
+            // Match supplier
+            if (!$item->supplier_name || $item->supplier_name=="None" || $item->supplier_name=="Misc"){
+                $id = 0;
+            } else {
+                $id = $this->getIdForName($suppliers, $item->supplier_name);
+            }
+            if ($id===false){
+                if ((isset($options->add_suppliers) && $options->add_suppliers===true)){
+                    EventStream::sendStreamData(['status'=>"Adding supplier..."]);
+                    $id = $supMdl->create($item->supplier_name);
+                    if (!is_numeric($id)){
+                        $result['error'] = "Could not add new supplier " . $item->supplier_name . " on line ".$count." of the CSV: ".$catMdl->errorInfo;
+                        EventStream::sendStreamData($result);
+                        return $result;
+                    }
+                    $suppliers[] = [''=>$id, 'name'=>$item->supplier_name];
+                } else {
+                    $result['error'] = "Could not find supplier id for name " . $item->supplier_name . " on line ".$count." of the CSV";
+                    EventStream::sendStreamData($result);
+                    return $result;
+                }
+            }
+            $item->supplierid = $id;
+            unset($item->supplier_name);
+
+            $items[$key] = $item;
+
+            $count++;
+        }
+
+        EventStream::sendStreamData(['status'=>"Importing Items..."]);
+        $result['data'] = [];
+        $count = 1;
+        foreach ($items as $item){
+            EventStream::sendStreamData(['progress'=>$count]);
+
+            $itemObj = new WposStoredItem($item);
+            $id = $itemMdl->create($itemObj);
+
+            if ($id===false){
+                $result['error'] = "Failed to add the item on line ".$count." of the CSV: ".$itemMdl->errorInfo;
+                EventStream::sendStreamData($result);
+                return $result;
+            }
+            $itemObj->id = $id;
+            $result['data'][$id] = $itemObj;
+
+            $count++;
+        }
+
+        unset($_SESSION['import_data']);
+        unset($_SESSION['import_options']);
+
+        EventStream::sendStreamData($result);
+        return $result;
+    }
+
     // ITEM CATEGORIES
     /**
      * Add a new category
@@ -157,10 +343,10 @@ class WposAdminItems {
             $result['error'] = $errors;
             return $result;
         }
-        $supMdl = new CategoriesModel();
-        $qresult = $supMdl->create($this->data->name);
+        $catMdl = new CategoriesModel();
+        $qresult = $catMdl->create($this->data->name);
         if ($qresult === false) {
-            $result['error'] = "Could not add the category";
+            $result['error'] = "Could not add the category: ".$catMdl->errorInfo;
         } else {
             $result['data'] = $this->getCategoryRecord($qresult);
             // broadcast update
@@ -184,10 +370,10 @@ class WposAdminItems {
             $result['error'] = $errors;
             return $result;
         }
-        $supMdl = new CategoriesModel();
-        $qresult = $supMdl->edit($this->data->id, $this->data->name);
+        $catMdl = new CategoriesModel();
+        $qresult = $catMdl->edit($this->data->id, $this->data->name);
         if ($qresult === false) {
-            $result['error'] = "Could not edit the category";
+            $result['error'] = "Could not edit the category: ".$catMdl->errorInfo;
         } else {
             $result['data'] = $this->getCategoryRecord($this->data->id);
             // broadcast update
@@ -219,20 +405,30 @@ class WposAdminItems {
     {
         // validate input
         if (!is_numeric($this->data->id)) {
-            $result['error'] = "A valid id must be supplied";
-            return $result;
+            if (isset($this->data->id)) {
+                $ids = explode(",", $this->data->id);
+                foreach ($ids as $id){
+                    if (!is_numeric($id)){
+                        $result['error'] = "A valid comma separated list of ids must be supplied";
+                        return $result;
+                    }
+                }
+            } else {
+                $result['error'] = "A valid id, or comma separated list of ids must be supplied";
+                return $result;
+            }
         }
-        $supMdl = new CategoriesModel();
-        $qresult = $supMdl->remove($this->data->id);
+        $catMdl = new CategoriesModel();
+        $qresult = $catMdl->remove(isset($ids)?$ids:$this->data->id);
         if ($qresult === false) {
-            $result['error'] = "Could not delete the category";
+            $result['error'] = "Could not delete the category: ".$catMdl->errorInfo;
         } else {
             $result['data'] = true;
             // broadcast update
             $socket = new WposSocketIO();
             $socket->sendConfigUpdate('item_categories', $this->data->id);
             // log data
-            Logger::write("Category deleted with id:" . $this->data->id, "CATEGORY");
+            Logger::write("Category(s) deleted with id:" . $this->data->id, "CATEGORY");
         }
         return $result;
     }
@@ -252,7 +448,7 @@ class WposAdminItems {
         $supMdl = new SuppliersModel();
         $qresult = $supMdl->create($this->data->name);
         if ($qresult === false) {
-            $result['error'] = "Could not add the supplier";
+            $result['error'] = "Could not add the supplier: ".$supMdl->errorInfo;
         } else {
             $result['data'] = $this->getSupplierRecord($qresult);
             // log data
@@ -276,12 +472,12 @@ class WposAdminItems {
         $supMdl = new SuppliersModel();
         $qresult = $supMdl->edit($this->data->id, $this->data->name);
         if ($qresult === false) {
-            $result['error'] = "Could not edit the supplier";
+            $result['error'] = "Could not edit the supplier: ".$supMdl->errorInfo;
         } else {
             $result['data'] = $this->getSupplierRecord($this->data->id);
 
             // log data
-            Logger::write("Supplier updated with id:" . $this->data->id, "SUPPLIER", json_encode($this->data));
+            Logger::write("Suppliers updated with id:" . $this->data->id, "SUPPLIER", json_encode($this->data));
         }
         return $result;
     }
@@ -306,18 +502,28 @@ class WposAdminItems {
     {
         // validate input
         if (!is_numeric($this->data->id)) {
-            $result['error'] = "A valid id must be supplied";
-            return $result;
+            if (isset($this->data->id)) {
+                $ids = explode(",", $this->data->id);
+                foreach ($ids as $id){
+                    if (!is_numeric($id)){
+                        $result['error'] = "A valid comma separated list of ids must be supplied";
+                        return $result;
+                    }
+                }
+            } else {
+                $result['error'] = "A valid id, or comma separated list of ids must be supplied";
+                return $result;
+            }
         }
         $supMdl = new SuppliersModel();
-        $qresult = $supMdl->remove($this->data->id);
+        $qresult = $supMdl->remove(isset($ids)?$ids:$this->data->id);
         if ($qresult === false) {
-            $result['error'] = "Could not delete the supplier";
+            $result['error'] = "Could not delete the supplier: ".$supMdl->errorInfo;
         } else {
             $result['data'] = true;
 
             // log data
-            Logger::write("Supplier deleted with id:" . $this->data->id, "SUPPLIER");
+            Logger::write("Supplier(s) deleted with id:" . $this->data->id, "SUPPLIER");
         }
         return $result;
     }

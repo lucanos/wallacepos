@@ -26,7 +26,8 @@ $_SERVER['APP_ROOT'] = "/";
 
 require($_SERVER['DOCUMENT_ROOT'] . $_SERVER['APP_ROOT'] . 'library/wpos/config.php');
 // setup api error handling
-set_error_handler("errorHandler", E_ERROR | E_WARNING | E_PARSE);
+set_error_handler("errorHandler", E_ERROR | E_PARSE);
+set_error_handler("warningHandler", E_WARNING);
 set_exception_handler("exceptionHandler");
 
 // load classes and start session
@@ -198,39 +199,6 @@ function returnResult($result){
         echo($resstr);
     }
     die();
-}
-/**
- * Php error handler, sets & returns json result object
- * @param $errorno
- * @param $errstr
- * @param $errfile
- * @param $errline
- */
-function errorHandler($errorno, $errstr, $errfile, $errline){
-    global $result;
-
-    $result['errorCode'] = "phperr";
-
-    if ($result['error'] == "OK") $result['error'] = "";
-
-    $result['error'] .= $errorno . ": " . $errstr . " " . $errfile . " on line " . $errline . "\n";
-
-    die(json_encode($result));
-}
-/**
- * Php exception handler, sets & returns json result object
- * @param Exception $ex
- */
-function exceptionHandler(Exception $ex){
-    global $result;
-
-    $result['errorCode'] = "phpexc";
-
-    if ($result['error'] == "OK") $result['error'] = "";
-
-    $result['error'] .= $ex->getMessage() . "\n";
-
-    die(json_encode($result));
 }
 
 ?>

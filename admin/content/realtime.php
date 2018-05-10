@@ -190,7 +190,29 @@
 
                 <div class="infobox-data">
                     <span id="rttakings" class="infobox-data-number">-</span>
-                    <div class="infobox-content">Takings</div>
+                    <div class="infobox-content">Revenue</div>
+                </div>
+            </div><br/>
+
+            <div class="infobox infobox-orange infobox-cost">
+                <div class="infobox-icon">
+                    <i class="icon-dollar"></i>
+                </div>
+
+                <div class="infobox-data">
+                    <span id="rtcost" class="infobox-data-number">-</span>
+                    <div class="infobox-content">Cost</div>
+                </div>
+            </div>
+
+            <div class="infobox infobox-green infobox-profit">
+                <div class="infobox-icon">
+                    <i class="icon-dollar"></i>
+                </div>
+
+                <div class="infobox-data">
+                    <span id="rtprofit" class="infobox-data-number">-</span>
+                    <div class="infobox-content">Profit</div>
                 </div>
             </div>
         </div>
@@ -225,9 +247,6 @@
 </div>
 </div>
 <div class="hr hr32 hr-dotted"></div>
-
-<!-- Websocket library -->
-<script type="text/javascript" src="/assets/libs/socketio/socket.io.min.js"></script>
 
 <script type="text/javascript">
 var onlinedev = {};
@@ -292,17 +311,26 @@ function populateOnlineDevices(devices) {
     devtable.html('');
     devselect.html('');
 
+    devselect.append("<option value='all' selected>All</option>");
+
     if (Object.keys(devices).length > 1) { // devices will always have the admin dash
         for (var i in devices) {
             if (i != 0) { // do not include admin dash
-                devtable.append("<tr><td><i class='icon-lightbulb green icon-large'></i>&nbsp;&nbsp;" + devices[i].username + " / " + WPOS.devices[i].name + " / " + WPOS.devices[i].locationname + "</td></tr>");
-                devselect.append("<option value='" + i + "'>" + devices[i].username + " / " + WPOS.devices[i].name + " / " + WPOS.devices[i].locationname + "</option>");
+                var devname, locname;
+                if (WPOS.devices.hasOwnProperty(i)){
+                    devname = WPOS.devices[i].name;
+                    locname = WPOS.devices[i].locationname;
+                } else {
+                    devname = "Unknown";
+                    locname = "Unknown";
+                }
+                devtable.append("<tr><td><i class='icon-lightbulb green icon-large'></i>&nbsp;&nbsp;" + devices[i].username + " / " + devname + " / " + locname + "</td></tr>");
+                devselect.append("<option value='" + i + "'>" + devices[i].username + " / " + devname + " / " + locname + "</option>");
             }
         }
     } else {
         devtable.append("<tr><td>There are no online devices.</td></tr>");
     }
-    devselect.append("<option value='all' selected>All</option>");
 }
 
 function processIncomingSale(saleobj) {
@@ -313,6 +341,7 @@ function processIncomingSale(saleobj) {
             // sale does not have any void/refund so no need to check anything else
             totals.salenum = parseInt(totals.salenum) + 1;
             totals.saletotal = parseFloat(totals.saletotal) + parseFloat(saleobj.total);
+            totals.cost = parseFloat(totals.cost) + parseFloat(saleobj.cost);
         } else {
             if (saleobj.hasOwnProperty("voiddata")) { // If sale had void data, add it the totals
                 totals.voidnum = parseInt(totals.voidnum) + 1;
@@ -320,6 +349,7 @@ function processIncomingSale(saleobj) {
                 if (sales.hasOwnProperty(saleobj.ref)){ // If the sale was processed today, remove from the sales total
                     totals.salenum -= 1;
                     totals.saletotal = parseFloat(totals.saletotal) - parseFloat(saleobj.total);
+                    totals.cost = parseFloat(totals.cost) - parseFloat(saleobj.cost);
                 }
             } else {
                 if (!sales.hasOwnProperty(saleobj.ref)){ // If the sale has not been processed (ie, refund only)
@@ -345,6 +375,7 @@ function processIncomingSale(saleobj) {
         }
         // update total takings and populate the stats widget
         totals.totaltakings = parseFloat(totals.saletotal) - parseFloat(totals.refundtotal);
+        totals.profit = totals.totaltakings - parseFloat(totals.cost);
         populateTodayStats();
         // Update sales chart
         reloadGraph();
@@ -410,7 +441,7 @@ function updateSalesTable(saleobj) {
     // preprend insert the new row with zero height
     $("#nosalesrow").remove();
     // TODO: If refund get the amount refunded
-    $("#recentsalestable").prepend('<tr id="sr-' + saleobj.ref + '"><td>' + WPOS.util.getDateFromTimestamp(saleobj.processdt) + '</td><td>' + getStatusLabel(getSaleStatus(saleobj)) + '</td><td>' + WPOS.devices[saleobj.devid].name + '/' + WPOS.locations[saleobj.locid].name + '</td><td>' + getTotalItems(saleobj) + '</td><td>' + saleobj.total + '</td></tr>');
+    $("#recentsalestable").prepend('<tr id="sr-' + saleobj.ref + '"><td>' + WPOS.util.getDateFromTimestamp(saleobj.processdt) + '</td><td>' + getStatusLabel(getSaleStatus(saleobj)) + '</td><td>' + WPOS.devices[saleobj.devid].name + '/' + WPOS.locations[saleobj.locid].name + '</td><td>' + getTotalItems(saleobj) + '</td><td>' + WPOS.util.currencyFormat(saleobj.total) + '</td></tr>');
     // animate does not work for table rows so as a workaround we temporarily wrap in a div
     $("#sr" + saleobj.ref).find('td').wrapInner('<div style="display: block;" />').parent().find('td > div')
         .slideUp(1000, function(){
@@ -436,7 +467,7 @@ var sales;
 var graph;
 
 function loadTodaysSales() {
-    if (sales===false)
+    if (!sales)
         return false;
     if (Object.keys(sales).length > 0) {
         // sort by time
@@ -458,6 +489,8 @@ function loadTodaysSales() {
 }
 
 function populateTodayStats() {
+    if (!totals)
+        return false;
     // populate the fields
     $("#rtsalenum").text(totals.salenum);
     $("#rtsaletotal").text(WPOS.util.currencyFormat(totals.saletotal));
@@ -466,6 +499,8 @@ function populateTodayStats() {
     $("#rtvoidnum").text(totals.voidnum);
     $("#rtvoidtotal").text(WPOS.util.currencyFormat(totals.voidtotal));
     $("#rttakings").text(WPOS.util.currencyFormat(totals.totaltakings, true));
+    $("#rtcost").text(WPOS.util.currencyFormat(totals.cost, true));
+    $("#rtprofit").text(WPOS.util.currencyFormat(totals.profit, true));
     // Set onclicks
     $(".infobox-sales").on('click', function(){ WPOS.transactions.openTransactionList(totals.salerefs); });
     $(".infobox-refunds").on('click', function(){ WPOS.transactions.openTransactionList(totals.refundrefs); });
@@ -581,11 +616,13 @@ $(function () {
     // load data
     WPOS.startSocket();
     var data = WPOS.sendJsonData("multi", JSON.stringify({"sales/get":{stime: stoday, etime: etime}, "stats/general":{"stime":stoday, "etime":etime}, "graph/general":{"stime": stime, "etime": etime, "interval": 1800000}}));
-    sales = data['sales/get'];
-    totals = data['stats/general'];
-    loadTodaysSales();
-    populateTodayStats();
-    loadGraph(data['graph/general']);
+    if (data!==false) {
+        sales = data['sales/get'];
+        totals = data['stats/general'];
+        loadTodaysSales();
+        populateTodayStats();
+        loadGraph(data['graph/general']);
+    }
     // hide loader
     WPOS.util.hideLoader();
 })

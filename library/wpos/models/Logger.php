@@ -36,11 +36,20 @@ class Logger {
      * @param string $type
      * @param null $data
      */
-    public static function write($msg, $type="Misc", $data=null){
+    public static function write($msg, $type="Misc", $data=null, $showUser=true){
+
+        if ($showUser) {
+            if (php_sapi_name() === 'cli'){
+                $user = "system:cli";
+            } else {
+                $auth = new Auth();
+                $user = $auth->isLoggedIn() ? $auth->getUserId() . ":" . $auth->getUsername() : ($auth->isCustomerLoggedIn() ? $auth->getCustomerId() . ":" . $auth->getCustomerUsername() : 'system');
+            }
+        }
         // open file
         $fd = fopen($_SERVER['DOCUMENT_ROOT'].$_SERVER['APP_ROOT'].self::$directory.DIRECTORY_SEPARATOR."wpos_log_".date("y-m-d").".txt", "a");
         // write string
-        fwrite($fd, "[".date("y-m-d H:i:s")."] (".$type.") ".$msg.($data!=null?"\nData: ".$data:"")."\n");
+        fwrite($fd, "[".date("y-m-d H:i:s")."] (".$type.(isset($user)?' - '.$user.') ':') ').$msg.($data!=null?"\nData: ".$data:"")."\n");
         // close file
         fclose($fd);
     }
